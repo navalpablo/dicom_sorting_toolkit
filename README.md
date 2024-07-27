@@ -1,5 +1,7 @@
 # DICOM Sorting Toolkit
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.13099114.svg)](https://doi.org/10.5281/zenodo.13099114)
+
 This tool provides functionality for sorting and anonymizing DICOM files. 
 
 ## Features:
@@ -13,7 +15,7 @@ The executable for this tool is available in the releases section of this reposi
 
 ##  Usage:
 1. Download the executable from the releases section.
-2. Run the executable (it has been tested on a Windows 10 machine).
+2. Run the executable (it has been tested on a Windows 10 and Windwos 11 machines).
 3. Use the GUI to select your input and output directories, and choose your desired options.
 4. Click "Execute Sorting" to process your DICOM files.
 
