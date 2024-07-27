@@ -1,6 +1,6 @@
 # DICOM Sorting Tool
 
-This tool provides functionality for sorting and anonymizing DICOM files. It was developed by Pablo Naval Baudin in 2024.
+This tool provides functionality for sorting and anonymizing DICOM files. 
 
 ## Features:
 - DICOM file sorting
