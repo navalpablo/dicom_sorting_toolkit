@@ -1,6 +1,6 @@
 # DICOM Sorting Toolkit
 
-[![DOI](https://zenodo.org/badge/834454778.svg)](https://zenodo.org/doi/10.5281/zenodo.13094029)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.13099114.svg)](https://doi.org/10.5281/zenodo.13099114)
 
 This tool provides functionality for sorting and anonymizing DICOM files. 
 
