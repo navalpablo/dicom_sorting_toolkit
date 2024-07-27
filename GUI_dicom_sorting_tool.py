@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 import multiprocessing
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                              QPushButton, QFileDialog, QRadioButton, QButtonGroup, QMessageBox, 
@@ -11,28 +12,59 @@ from dicom_sorting_tool import sort_dicom, decompress_dataset, read_id_correlati
 class DecompressionThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal()
+    error = pyqtSignal(str)
 
     def __init__(self, input_dir):
         QThread.__init__(self)
         self.input_dir = input_dir
 
     def run(self):
-        total_files = sum([len(files) for r, d, files in os.walk(self.input_dir)])
-        processed = 0
-        for root, dirs, files in os.walk(self.input_dir):
-            for file in files:
-                if file.lower().endswith('.dcm') or not os.path.splitext(file)[1]:
-                    try:
-                        file_path = os.path.join(root, file)
-                        dataset = pydicom.dcmread(file_path)
-                        decompressed = decompress_dataset(dataset)
-                        decompressed.save_as(file_path)
-                    except Exception as e:
-                        print(f"Error processing {file}: {str(e)}")
-                processed += 1
-                self.progress.emit(int(processed / total_files * 100))
-        self.finished.emit()
+        try:
+            total_files = sum([len(files) for r, d, files in os.walk(self.input_dir)])
+            processed = 0
+            decompressed_count = 0
+            skipped_count = 0
 
+            for root, dirs, files in os.walk(self.input_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    try:
+                        # Attempt to read all files as DICOM
+                        dataset = pydicom.dcmread(file_path)
+                        
+                        # Check if the file is compressed
+                        if hasattr(dataset, 'file_meta') and hasattr(dataset.file_meta, 'TransferSyntaxUID'):
+                            if dataset.file_meta.TransferSyntaxUID.is_compressed:
+                                decompressed = decompress_dataset(dataset)
+                                decompressed.save_as(file_path)
+                                decompressed_count += 1
+                                logging.info(f"Decompressed: {file_path}")
+                            else:
+                                logging.info(f"Already uncompressed: {file_path}")
+                                skipped_count += 1
+                        else:
+                            logging.warning(f"File lacks transfer syntax information: {file_path}")
+                            skipped_count += 1
+                    
+                    except pydicom.errors.InvalidDicomError:
+                        logging.warning(f"Not a DICOM file: {file_path}")
+                        skipped_count += 1
+                    except Exception as e:
+                        self.error.emit(f"Error processing {file_path}: {str(e)}")
+                        skipped_count += 1
+
+                    processed += 1
+                    self.progress.emit(int(processed / total_files * 100))
+
+            logging.info(f"Decompression completed. "
+                         f"Decompressed: {decompressed_count}, "
+                         f"Skipped: {skipped_count}, "
+                         f"Total files: {total_files}")
+            self.finished.emit()
+        
+        except Exception as e:
+            self.error.emit(f"An error occurred during decompression: {str(e)}")
+            
 class SortingThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal()
@@ -64,10 +96,17 @@ class SortingThread(QThread):
     def cancel(self):
         self.cancel_flag.value = True
             
+
 class DicomSortingGUI(QWidget):
     def __init__(self):
         super().__init__()
+        self.sorting_thread = None
+        self.progress_dialog = None
         self.initUI()
+
+        # Set up logging
+        logging.basicConfig(filename='dicom_sorting_gui.log', level=logging.DEBUG,
+                            format='%(asctime)s - %(levelname)s - %(message)s')
 
     def initUI(self):
         layout = QVBoxLayout()
@@ -260,27 +299,33 @@ class DicomSortingGUI(QWidget):
         self.sorting_thread.error.connect(self.sorting_error)
         self.sorting_thread.start()
 
+
     def cancel_sorting(self):
         if self.sorting_thread and self.sorting_thread.isRunning():
             self.sorting_thread.cancel()
             self.sorting_thread.wait()
-        self.progress_dialog.close()
-        QMessageBox.information(self, "Cancelled", "DICOM sorting was cancelled.")
-
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        self.sorting_thread = None
+        self.progress_dialog = None
+        
     def update_sorting_progress(self, value):
-        if self.progress_dialog is not None and not self.progress_dialog.wasCanceled():
+        if self.progress_dialog and not self.progress_dialog.wasCanceled():
             self.progress_dialog.setValue(value)
-
+        
     def sorting_finished(self):
-        if self.progress_dialog is not None:
+        if self.progress_dialog:
             self.progress_dialog.close()
         QMessageBox.information(self, "Success", "DICOM sorting completed successfully.")
+        self.sorting_thread = None
+        self.progress_dialog = None
 
     def sorting_error(self, error_message):
-        if self.progress_dialog is not None:
+        if self.progress_dialog:
             self.progress_dialog.close()
         QMessageBox.critical(self, "Error", f"An error occurred during sorting: {error_message}")
-
+        self.sorting_thread = None
+        self.progress_dialog = None
 
     def execute_decompression(self):
         input_dir = self.decomp_input_edit.text()
@@ -291,6 +336,7 @@ class DicomSortingGUI(QWidget):
         self.decomp_thread = DecompressionThread(input_dir)
         self.decomp_thread.progress.connect(self.update_progress)
         self.decomp_thread.finished.connect(self.decompression_finished)
+        self.decomp_thread.error.connect(self.decompression_error)  # Add this line
         self.decomp_thread.start()
 
         self.progress_dialog = QProgressDialog("Decompressing DICOM files...", "Cancel", 0, 100, self)
@@ -298,6 +344,13 @@ class DicomSortingGUI(QWidget):
         self.progress_dialog.setAutoClose(False)
         self.progress_dialog.canceled.connect(self.decomp_thread.terminate)
         self.progress_dialog.show()
+
+    def decompression_error(self, error_message):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        QMessageBox.critical(self, "Error", f"An error occurred during decompression: {error_message}")
+        self.decomp_thread = None
+        self.progress_dialog = None
 
     def update_progress(self, value):
         self.progress_dialog.setValue(value)
