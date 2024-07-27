@@ -114,3 +114,7 @@ Generates a dummy table from an existing TSV file containing DICOM sequence info
 
 - `--input`: Path to the input TSV file.
 - `--criteria_json`: JSON string specifying the series descriptions and any OR conditions.
+
+
+### Licensing disclosure 
+This project uses several open-source libraries including PyQt5, pydicom, pathvalidate, and tqdm, among others. Please see their respective websites for more information on their licenses.
