@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QL
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import pydicom
 from dicom_sorting_tool import sort_dicom, decompress_dataset, read_id_correlation
+import subprocess
 
 class DecompressionThread(QThread):
     progress = pyqtSignal(int)
@@ -64,7 +65,7 @@ class DecompressionThread(QThread):
         
         except Exception as e:
             self.error.emit(f"An error occurred during decompression: {str(e)}")
-            
+
 class SortingThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal()
@@ -95,12 +96,52 @@ class SortingThread(QThread):
 
     def cancel(self):
         self.cancel_flag.value = True
+
+class BIDSCreationThread(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, sorted_dir, config_file, bids_dir):
+        QThread.__init__(self)
+        self.sorted_dir = sorted_dir
+        self.config_file = config_file
+        self.bids_dir = bids_dir
+
+    def run(self):
+        try:
+            cmd = [
+                "python", "Batch_dcm2bids.py",
+                "--dicomin", self.sorted_dir,
+                "--config", self.config_file,
+                "--bidsdir", self.bids_dir
+            ]
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    print(output.strip())
+                    # You might want to parse the output to update progress
+                    # For now, we'll just emit a dummy progress
+                    self.progress.emit(50)
+            
+            rc = process.poll()
+            if rc != 0:
+                error = process.stderr.read()
+                self.error.emit(f"BIDS creation failed with error: {error}")
+            else:
+                self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
 
 class DicomSortingGUI(QWidget):
     def __init__(self):
         super().__init__()
         self.sorting_thread = None
+        self.bids_thread = None
         self.progress_dialog = None
         self.initUI()
 
@@ -203,6 +244,48 @@ class DicomSortingGUI(QWidget):
         decomp_group.setLayout(decomp_layout)
         layout.addWidget(decomp_group)
 
+        # BIDS Creation section
+        bids_group = QGroupBox("Create BIDS Directory")
+        bids_layout = QVBoxLayout()
+
+        # Sorted Directory
+        sorted_dir_layout = QHBoxLayout()
+        sorted_dir_layout.addWidget(QLabel("Sorted Directory:"))
+        self.sorted_dir_edit = QLineEdit()
+        sorted_dir_layout.addWidget(self.sorted_dir_edit)
+        sorted_dir_button = QPushButton("Browse")
+        sorted_dir_button.clicked.connect(lambda: self.browse_directory(self.sorted_dir_edit))
+        sorted_dir_layout.addWidget(sorted_dir_button)
+        bids_layout.addLayout(sorted_dir_layout)
+
+        # dcm2bids Config File
+        config_layout = QHBoxLayout()
+        config_layout.addWidget(QLabel("dcm2bids Config File:"))
+        self.config_edit = QLineEdit()
+        config_layout.addWidget(self.config_edit)
+        config_button = QPushButton("Browse")
+        config_button.clicked.connect(lambda: self.browse_file(self.config_edit))
+        config_layout.addWidget(config_button)
+        bids_layout.addLayout(config_layout)
+
+        # BIDS Output Directory
+        bids_output_layout = QHBoxLayout()
+        bids_output_layout.addWidget(QLabel("BIDS Output Directory:"))
+        self.bids_output_edit = QLineEdit()
+        bids_output_layout.addWidget(self.bids_output_edit)
+        bids_output_button = QPushButton("Browse")
+        bids_output_button.clicked.connect(lambda: self.browse_directory(self.bids_output_edit))
+        bids_output_layout.addWidget(bids_output_button)
+        bids_layout.addLayout(bids_output_layout)
+
+        # Create BIDS button
+        create_bids_button = QPushButton("Create BIDS Directory")
+        create_bids_button.clicked.connect(self.execute_bids_creation)
+        bids_layout.addWidget(create_bids_button)
+
+        bids_group.setLayout(bids_layout)
+        layout.addWidget(bids_group)
+
         # Help button
         help_button = QPushButton("Help")
         help_button.clicked.connect(self.show_help)
@@ -219,7 +302,7 @@ class DicomSortingGUI(QWidget):
         layout.addWidget(disclaimer_label)
 
         self.setLayout(layout)
-        self.setWindowTitle('DICOM Sorting Tool')
+        self.setWindowTitle('DICOM Sorting and BIDS Creation Tool')
         self.show()
 
     def browse_directory(self, line_edit):
@@ -259,17 +342,34 @@ class DicomSortingGUI(QWidget):
                                 "OldID2  NewID2")
 
     def show_help(self):
-        QMessageBox.information(self, "Help",
-                                "This tool provides two main functions:\n\n"
-                                "1. DICOM Sorting: Organizes and optionally anonymizes DICOM files.\n"
-                                "   - Select input and output directories\n"
-                                "   - Choose anonymization level\n"
-                                "   - Optionally provide an ID correlation file\n"
-                                "   - Select additional options (decompression, skipping certain images)\n\n"
-                                "2. In-place Decompression: Decompresses DICOM files in their original location.\n"
-                                "   - Select the directory containing DICOM files\n"
-                                "   - The tool will recursively find and decompress all DICOM files\n\n"
-                                "For more detailed information, click the '?' buttons next to specific options.")
+	    QMessageBox.information(self, "Help",
+		"This tool provides three main functions:\n\n"
+		"1. DICOM Sorting: Organizes and optionally anonymizes DICOM files.\n"
+		"   - Select input and output directories\n"
+		"   - Choose anonymization level\n"
+		"   - Optionally provide an ID correlation file\n"
+		"   - Select additional options (decompression, skipping certain images)\n\n"
+		"2. In-place Decompression: Decompresses DICOM files in their original location.\n"
+		"   - Select the directory containing DICOM files\n"
+		"   - The tool will recursively find and decompress all DICOM files\n\n"
+		"3. BIDS Creation: Creates a BIDS-compliant directory structure from sorted DICOM files.\n"
+		"   - Specify the sorted DICOM directory\n"
+		"   - Provide the dcm2bids configuration file\n"
+		"   - Choose the output directory for the BIDS structure\n\n"
+		"For more detailed information, click the '?' buttons next to specific options.\n\n"
+		"Important Notice:\n"
+		"This tool is an open-access, non-profit project that integrates several third-party libraries and tools, "
+		"each subject to their own license terms. These include, but are not limited to:\n"
+		"- PyQt5 (GPL/Commercial)\n"
+		"- dcm2niix (BSD 3-Clause)\n"
+		"- dcm2bids (MIT)\n"
+		"- pydicom (MIT)\n"
+		"- NumPy (BSD 3-Clause)\n"
+		"- pandas (BSD 3-Clause)\n\n"
+		"We express our gratitude to the developers of these tools. Users of this application should refer to and comply "
+		"with the license terms of each component. This tool is provided 'as is', without warranty of any kind, and is "
+		"intended for research and educational purposes.\n\n"
+		"For full license details and up-to-date information, please visit our project repository.")  
 
     def execute_sorting(self):
         input_dir = self.input_edit.text()
@@ -298,7 +398,6 @@ class DicomSortingGUI(QWidget):
         self.sorting_thread.finished.connect(self.sorting_finished)
         self.sorting_thread.error.connect(self.sorting_error)
         self.sorting_thread.start()
-
 
     def cancel_sorting(self):
         if self.sorting_thread and self.sorting_thread.isRunning():
@@ -336,7 +435,7 @@ class DicomSortingGUI(QWidget):
         self.decomp_thread = DecompressionThread(input_dir)
         self.decomp_thread.progress.connect(self.update_progress)
         self.decomp_thread.finished.connect(self.decompression_finished)
-        self.decomp_thread.error.connect(self.decompression_error)  # Add this line
+        self.decomp_thread.error.connect(self.decompression_error)
         self.decomp_thread.start()
 
         self.progress_dialog = QProgressDialog("Decompressing DICOM files...", "Cancel", 0, 100, self)
@@ -359,6 +458,44 @@ class DicomSortingGUI(QWidget):
         self.progress_dialog.close()
         QMessageBox.information(self, "Success", "In-place decompression completed successfully.")
 
+    def execute_bids_creation(self):
+        sorted_dir = self.sorted_dir_edit.text()
+        config_file = self.config_edit.text()
+        bids_dir = self.bids_output_edit.text()
+
+        if not sorted_dir or not config_file or not bids_dir:
+            QMessageBox.warning(self, "Error", "Please fill in all fields for BIDS creation.")
+            return
+
+        self.progress_dialog = QProgressDialog("Creating BIDS directory...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.show()
+
+        self.bids_thread = BIDSCreationThread(sorted_dir, config_file, bids_dir)
+        self.bids_thread.progress.connect(self.update_bids_progress)
+        self.bids_thread.finished.connect(self.bids_creation_finished)
+        self.bids_thread.error.connect(self.bids_creation_error)
+        self.bids_thread.start()
+
+    def update_bids_progress(self, value):
+        if self.progress_dialog and not self.progress_dialog.wasCanceled():
+            self.progress_dialog.setValue(value)
+
+    def bids_creation_finished(self):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        QMessageBox.information(self, "Success", "BIDS directory created successfully.")
+        self.bids_thread = None
+        self.progress_dialog = None
+
+    def bids_creation_error(self, error_message):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        QMessageBox.critical(self, "Error", f"An error occurred during BIDS creation: {error_message}")
+        self.bids_thread = None
+        self.progress_dialog = None
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()

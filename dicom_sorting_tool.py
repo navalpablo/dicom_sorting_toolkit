@@ -14,7 +14,6 @@ from datetime import datetime
 import hashlib
 import warnings
 
-
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydicom.valuerep")
 
@@ -157,7 +156,7 @@ def is_derived_image(dataset):
 def has_burned_in_annotation(dataset):
     return dataset.get('BurnedInAnnotation', '').upper() == 'YES'
 
-def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=None, decompress=False, strict_anonymize=False):
+def copy_dicom_image(src_file, dest_base_dir, anonymize=False, id_map=None, decompress=False, strict_anonymize=False):
     non_dicom_extensions = ['.png', '.jpeg', '.jpg', '.gif', '.bmp']
     if any(src_file.lower().endswith(ext) for ext in non_dicom_extensions):
         return
@@ -174,22 +173,26 @@ def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=N
     if decompress:
         dataset = decompress_dataset(dataset)
 
-    for attribute in ['PatientID', 'StudyDate', 'SeriesNumber', 'SeriesDescription']:
-        value = get_dicom_attribute(dataset, attribute)
-        if attribute == 'SeriesDescription':
-            value = sanitize_series_description(value)
-        pattern = pattern.replace(f'%{attribute}%', value)
+    patient_id = get_dicom_attribute(dataset, 'PatientID')
+    study_date = get_dicom_attribute(dataset, 'StudyDate')
+    series_number = get_dicom_attribute(dataset, 'SeriesNumber')
+    series_description = get_dicom_attribute(dataset, 'SeriesDescription')
+    protocol_name = get_dicom_attribute(dataset, 'ProtocolName')
 
-    dest_directory = sanitize_filepath(os.path.join(dest_base_dir, pattern), platform='auto')
+    if not series_description.strip() and protocol_name.strip():
+        series_description = protocol_name
+        dataset.SeriesDescription = protocol_name
+
+    series_info = f"{series_number}_{sanitize_series_description(series_description)}"
+
+    dest_directory = sanitize_filepath(os.path.join(dest_base_dir, patient_id, study_date, series_info), platform='auto')
     os.makedirs(dest_directory, exist_ok=True)
     
     unique_filename = generate_unique_filename(dest_directory, os.path.basename(src_file))
     dataset.save_as(os.path.join(dest_directory, unique_filename))
 
-
-
 def process_file(args):
-    file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in = args
+    file, dest_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in = args
     try:
         dataset = pydicom.dcmread(file)
         
@@ -201,17 +204,17 @@ def process_file(args):
             logging.info(f"Skipping image with burned-in annotation: {file}")
             return file, False
 
-        copy_dicom_image(file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize)
+        copy_dicom_image(file, dest_dir, anonymize, id_map, decompress, strict_anonymize)
         return file, True
     except Exception as e:
         logging.error(f"Error processing file {file}: {str(e)}")
         return file, False
 
-def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, progress_callback=None, cancel_flag=None):
+def copy_directory(src_dir, dest_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, progress_callback=None, cancel_flag=None):
     all_files = [os.path.join(root, file) for root, _, files in os.walk(src_dir) for file in files]
     total_files = len(all_files)
     
-    args_list = [(file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in) for file in all_files]
+    args_list = [(file, dest_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in) for file in all_files]
 
     success_count = 0
     failure_count = 0
@@ -234,10 +237,9 @@ def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, st
     logging.info(f"Processing completed. Successes: {success_count}, Failures: {failure_count}")
 
 def sort_dicom(input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, progress_callback=None, cancel_flag=None):
-    pattern = '%PatientID%/%StudyDate%/%SeriesDescription%'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    copy_directory(input_dir, output_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, progress_callback, cancel_flag)
+    copy_directory(input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, progress_callback, cancel_flag)
 
 missing_ids = set()
 
@@ -253,7 +255,6 @@ def main():
     parser.add_argument('--skip_derived', action='store_true', help='If specified, skips DICOM files that are derived or secondary images.')
     parser.add_argument('--skip_burned_in_images', action='store_true', help='If specified, skips DICOM files with burned-in annotations.')
     args = parser.parse_args()
-
 
     id_map = read_id_correlation(args.ID_correlation) if args.ID_correlation else None
 

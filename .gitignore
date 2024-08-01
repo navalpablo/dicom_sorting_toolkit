@@ -1,1 +1,13 @@
 dicom_processing.log
+# Ignore build directory
+build/
+
+# Ignore dist directory
+dist/
+
+# Ignore all .pyc files
+*.pyc
+
+# Ignore __pycache__ directories
+__pycache__/
+
