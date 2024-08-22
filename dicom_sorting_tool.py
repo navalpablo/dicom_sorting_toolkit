@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import tempfile
 import argparse
 import pydicom
 from pathvalidate import sanitize_filepath
@@ -18,11 +19,12 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydicom.valuerep")
 
 # Set up logging
-log_file = 'dicom_processing.log'
+log_dir = tempfile.gettempdir()  # Get the system's temp directory
+log_file = os.path.join(log_dir, 'dicom_processing.log')
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     filename=log_file,
-                    filemode='w')
+                    filemode='w')                    
 
 # Add console handler for error messages only
 console = logging.StreamHandler()

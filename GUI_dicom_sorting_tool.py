@@ -1,5 +1,6 @@
 import sys
 import os
+import tempfile
 import logging
 import multiprocessing
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
@@ -146,8 +147,12 @@ class DicomSortingGUI(QWidget):
         self.initUI()
 
         # Set up logging
-        logging.basicConfig(filename='dicom_sorting_gui.log', level=logging.DEBUG,
+        
+        log_dir = tempfile.gettempdir()  # Get the system's temp directory
+        log_file = os.path.join(log_dir, 'dicom_sorting_gui.log')
+        logging.basicConfig(filename=log_file, level=logging.DEBUG,
                             format='%(asctime)s - %(levelname)s - %(message)s')
+        
 
     def initUI(self):
         layout = QVBoxLayout()
