@@ -233,22 +233,22 @@ class DicomSortingGUI(QWidget):
             line_edit.setText(file)
 
     def show_anon_info(self):
-    QMessageBox.information(self, "Anonymization Info",
-        "No Anonymization: No changes to patient information.\n\n"
-        "Basic Anonymization (--anonymize flag):\n"
-        "- Anonymizes: PatientName, PatientID, PatientBirthDate\n"
-        "- Preserves: PatientAge, PatientSex, PatientWeight, PatientSize\n"
-        "- If no ID correlation file is provided, a random 8-character code will be assigned as the new PatientID\n\n"
-        "Strict Anonymization (--anonymize and --anonymize_strict flags):\n"
-        "- Includes all Basic Anonymization changes\n"
-        "- Additionally anonymizes all tags starting with 'Patient', including:\n"
-        "  PatientAge (set to unknown), PatientSex (set to Other/Unknown), PatientWeight (cleared), PatientSize (cleared)\n"
-        "- Removes all private tags\n"
-        "- Generates dummy UIDs for: StudyInstanceUID, SeriesInstanceUID, SOPInstanceUID\n"
-        "- Anonymizes any tag containing 'Date' (except StudyDate) or 'ID'\n"
-        "- Sets other potentially identifying information to 'ANONYMIZED'\n\n"
-        "Note: In both cases, if an ID correlation file is provided, it will be used to map old PatientIDs to new ones. "
-        "If no correlation is provided, a consistent random code will be generated for each unique PatientID.")
+        QMessageBox.information(self, "Anonymization Info",
+            "No Anonymization: No changes to patient information.\n\n"
+            "Basic Anonymization (--anonymize flag):\n"
+            "- Anonymizes: PatientName, PatientID, PatientBirthDate\n"
+            "- Preserves: PatientAge, PatientSex, PatientWeight, PatientSize\n"
+            "- If no ID correlation file is provided, a random 8-character code will be assigned as the new PatientID\n\n"
+            "Strict Anonymization (--anonymize and --anonymize_strict flags):\n"
+            "- Includes all Basic Anonymization changes\n"
+            "- Additionally anonymizes all tags starting with 'Patient', including:\n"
+            "  PatientAge (set to unknown), PatientSex (set to Other/Unknown), PatientWeight (cleared), PatientSize (cleared)\n"
+            "- Removes all private tags\n"
+            "- Generates dummy UIDs for: StudyInstanceUID, SeriesInstanceUID, SOPInstanceUID\n"
+            "- Anonymizes any tag containing 'Date' (except StudyDate) or 'ID'\n"
+            "- Sets other potentially identifying information to 'ANONYMIZED'\n\n"
+            "Note: In both cases, if an ID correlation file is provided, it will be used to map old PatientIDs to new ones. "
+            "If no correlation is provided, a consistent random code will be generated for each unique PatientID.")
 
     def show_id_info(self):
         QMessageBox.information(self, "ID Correlation File Info",
