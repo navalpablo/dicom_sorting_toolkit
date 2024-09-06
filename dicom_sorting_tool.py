@@ -66,13 +66,20 @@ def generate_dummy_id(original_id):
     hash_object = hashlib.md5(original_id.encode())
     return hash_object.hexdigest()[:8]  # Use first 8 characters of the hash
 
+
 def generate_dummy_uid(original_uid):
-    # Keep the prefix (1.2.840...) and replace the rest with a hash
+    # Keep the prefix (1.2.840...) and replace the rest with numeric hash
     uid_parts = original_uid.split('.')
     prefix = '.'.join(uid_parts[:4])  # Keep the first 4 parts of the UID
-    hash_object = hashlib.md5(original_uid.encode())
-    return f"{prefix}.{hash_object.hexdigest()[:8]}"  # Use only 8 characters of the hash
-
+    
+    # Generate a numeric hash
+    hash_object = hashlib.sha256(original_uid.encode())
+    numeric_hash = ''.join([str(int(c, 16)) for c in hash_object.hexdigest()])
+    
+    # Use the first 16 digits of the numeric hash
+    return f"{prefix}.{numeric_hash[:16]}"
+    
+    
 def anonymize_dicom_tags(dataset, id_map=None, strict=False):
     # Keep SeriesDescription and StudyDescription
     series_description = dataset.get('SeriesDescription', '')
@@ -93,28 +100,36 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False):
     
     if 'PatientBirthDate' in dataset:
         dataset.PatientBirthDate = generate_dummy_date(dataset.PatientBirthDate)
-    
+
     if strict:
         # Remove all private tags
         dataset.remove_private_tags()
         
         # Anonymize other potentially identifying information
         for tag in dataset.dir():
-            if tag.startswith('Patient') and tag not in ['PatientAge', 'PatientSex', 'PatientWeight', 'PatientSize', 'PatientID', 'PatientName']:
-                if tag == 'PatientBirthDate':
-                    continue  # We've already handled this above
+            if tag.startswith('Patient'):
+                if tag in ['PatientID', 'PatientName', 'PatientBirthDate']:
+                    continue  # We've already handled these above
+                elif tag in ['PatientSex', 'PatientAge', 'PatientWeight', 'PatientSize']:
+                    # We now handle these fields in strict mode
+                    if tag == 'PatientSex':
+                        setattr(dataset, tag, 'O')  # 'O' for Other/Unknown
+                    elif tag == 'PatientAge':
+                        setattr(dataset, tag, '000Y')  # Set to unknown age
+                    else:
+                        setattr(dataset, tag, '')  # Clear weight and size
                 elif 'Date' in tag and tag != 'StudyDate':
                     setattr(dataset, tag, generate_dummy_date(getattr(dataset, tag)))
                 elif 'ID' in tag:
                     setattr(dataset, tag, generate_dummy_id(getattr(dataset, tag)))
                 else:
                     setattr(dataset, tag, "ANONYMIZED")
-    
-    # Anonymize all UIDs
-    for tag in dataset.dir():
-        if tag.endswith('UID'):
-            original_uid = getattr(dataset, tag)
-            setattr(dataset, tag, generate_dummy_uid(original_uid))
+        
+        # Only anonymize UIDs in strict mode
+        for tag in dataset.dir():
+            if tag.endswith('UID'):
+                original_uid = getattr(dataset, tag)
+                setattr(dataset, tag, generate_dummy_uid(original_uid))
 
     # Restore SeriesDescription, StudyDescription, and StudyDate
     if series_description:
