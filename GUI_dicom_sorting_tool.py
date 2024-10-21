@@ -70,7 +70,7 @@ class SortingThread(QThread):
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned):
+    def __init__(self, input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned, id_from_name, anonymize_birth_date, anonymize_acquisition_date):
         QThread.__init__(self)
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -80,13 +80,17 @@ class SortingThread(QThread):
         self.strict_anonymize = strict_anonymize
         self.skip_derived = skip_derived
         self.skip_burned = skip_burned
+        self.id_from_name = id_from_name
+        self.anonymize_birth_date = anonymize_birth_date
+        self.anonymize_acquisition_date = anonymize_acquisition_date
         self.cancel_flag = multiprocessing.Value('b', False)
 
     def run(self):
         try:
             sort_dicom(self.input_dir, self.output_dir, self.anonymize, self.id_map, 
                        self.decompress, self.strict_anonymize, self.skip_derived, 
-                       self.skip_burned, progress_callback=self.progress.emit,
+                       self.skip_burned, self.id_from_name, self.anonymize_birth_date,
+                       self.anonymize_acquisition_date, progress_callback=self.progress.emit,
                        cancel_flag=self.cancel_flag)
             if not self.cancel_flag.value:
                 self.finished.emit()
@@ -165,6 +169,10 @@ class DicomSortingGUI(QWidget):
         id_layout.addWidget(id_info_button)
         sorting_layout.addLayout(id_layout)
 
+        # ID from Name option
+        self.id_from_name_check = QCheckBox("Read original ID from PatientName")
+        sorting_layout.addWidget(self.id_from_name_check)
+
         # Other options
         self.decompress_check = QCheckBox("Decompress")
         sorting_layout.addWidget(self.decompress_check)
@@ -172,6 +180,14 @@ class DicomSortingGUI(QWidget):
         sorting_layout.addWidget(self.skip_derived_check)
         self.skip_burned_check = QCheckBox("Skip Burned-in Images")
         sorting_layout.addWidget(self.skip_burned_check)
+
+        # Birth Date Anonymization
+        self.anonymize_birth_date_check = QCheckBox("Anonymize Birth Date to January 1st")
+        sorting_layout.addWidget(self.anonymize_birth_date_check)
+
+        # Acquisition Date Anonymization
+        self.anonymize_acquisition_date_check = QCheckBox("Anonymize Acquisition Date to January 1st")
+        sorting_layout.addWidget(self.anonymize_acquisition_date_check)
 
         # Execute button
         execute_button = QPushButton("Execute Sorting")
@@ -208,18 +224,33 @@ class DicomSortingGUI(QWidget):
         help_button.clicked.connect(self.show_help)
         layout.addWidget(help_button)
 
+
         # Add developer information and disclaimer
-        info_label = QLabel("Developed by Pablo Naval Baudin 2024")
+        info_label = QLabel("Developed by Pablo Naval Baudin 2024, though coded practically in full by Claude 3.5 Sonnet")
         info_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(info_label)
 
-        disclaimer_label = QLabel("This tool is for internal use only. It is not validated with DICOM standards, and we do not guarantee its accuracy or reliability.")
+        disclaimer_label = QLabel("This tool is intended for internal use. It is not validated with DICOM standards, and we do not guarantee its accuracy or reliability. Use at your own risk and responsibility.")
         disclaimer_label.setAlignment(Qt.AlignCenter)
         disclaimer_label.setWordWrap(True)
         layout.addWidget(disclaimer_label)
 
+        # Add GitHub repository link
+        github_label = QLabel('For queries and updates, visit: <a href="https://github.com/navalpablo/dicom_sorting_toolkit">GitHub Repository</a>')
+        github_label.setOpenExternalLinks(True)
+        github_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(github_label)
+
+        # Add license information
+        license_label = QLabel("License: GNU General Public License v3.0")
+        license_label.setAlignment(Qt.AlignCenter)
+        font = license_label.font()
+        font.setPointSize(8)  # Smaller font size
+        license_label.setFont(font)
+        layout.addWidget(license_label)
+
         self.setLayout(layout)
-        self.setWindowTitle('DICOM Sorting Tool')
+        self.setWindowTitle('DICOM Sorting Toolkit v0.1.0')
         self.show()
 
     def browse_directory(self, line_edit):
@@ -235,20 +266,22 @@ class DicomSortingGUI(QWidget):
     def show_anon_info(self):
         QMessageBox.information(self, "Anonymization Info",
             "No Anonymization: No changes to patient information.\n\n"
-            "Basic Anonymization (--anonymize flag):\n"
-            "- Anonymizes: PatientName, PatientID, PatientBirthDate\n"
-            "- Preserves: PatientAge, PatientSex, PatientWeight, PatientSize\n"
+            "Basic Anonymization:\n"
+            "- Anonymizes: PatientName, PatientID\n"
             "- If no ID correlation file is provided, a random 8-character code will be assigned as the new PatientID\n\n"
-            "Strict Anonymization (--anonymize and --anonymize_strict flags):\n"
+            "Strict Anonymization:\n"
             "- Includes all Basic Anonymization changes\n"
-            "- Additionally anonymizes all tags starting with 'Patient', including:\n"
-            "  PatientAge (set to unknown), PatientSex (set to Other/Unknown), PatientWeight (cleared), PatientSize (cleared)\n"
+            "- Additionally anonymizes all tags starting with 'Patient'\n"
             "- Removes all private tags\n"
             "- Generates dummy UIDs for: StudyInstanceUID, SeriesInstanceUID, SOPInstanceUID\n"
-            "- Anonymizes any tag containing 'Date' (except StudyDate) or 'ID'\n"
-            "- Sets other potentially identifying information to 'ANONYMIZED'\n\n"
-            "Note: In both cases, if an ID correlation file is provided, it will be used to map old PatientIDs to new ones. "
+            "- Anonymizes Accession Number with a random 16-digit number\n"
+            "- Eliminates most private tags. Preserves prepulse IR delay for TFE sequences\n\n"
+            "Additional Anonymization Options:\n"
+            "- Anonymize Birth Date: Sets PatientBirthDate to January 1st of the same year\n"
+            "- Anonymize Acquisition Date: Sets AcquisitionDate to January 1st of the same year\n\n"
+            "Note: If an ID correlation file is provided, it will be used to map old PatientIDs to new ones. "
             "If no correlation is provided, a consistent random code will be generated for each unique PatientID.")
+
 
     def show_id_info(self):
         QMessageBox.information(self, "ID Correlation File Info",
@@ -257,7 +290,8 @@ class DicomSortingGUI(QWidget):
                                 "Column 2: New Patient ID\n\n"
                                 "Example:\n"
                                 "OldID1  NewID1\n"
-                                "OldID2  NewID2")
+                                "OldID2  NewID2\n\n"
+                                "You can choose to read the original ID from either PatientID or PatientName using the checkbox.")
 
     def show_help(self):
         QMessageBox.information(self, "Help",
@@ -266,11 +300,18 @@ class DicomSortingGUI(QWidget):
                                 "   - Select input and output directories\n"
                                 "   - Choose anonymization level\n"
                                 "   - Optionally provide an ID correlation file\n"
-                                "   - Select additional options (decompression, skipping certain images)\n\n"
+                                "   - Choose to read original ID from PatientName or PatientID\n"
+                                "   - Select additional options (decompression, skipping certain images)\n"
+                                "   - Choose to anonymize Birth Date and/or Acquisition Date\n"
+                                "   - Files are sorted into the following structure:\n"
+                                "     PatientID/StudyDate/SeriesNumber_SeriesDescription/\n\n"
                                 "2. In-place Decompression: Decompresses DICOM files in their original location.\n"
                                 "   - Select the directory containing DICOM files\n"
                                 "   - The tool will recursively find and decompress all DICOM files\n\n"
-                                "For more detailed information, click the '?' buttons next to specific options.")
+                                "For more detailed information, click the '?' buttons next to specific options.\n\n"
+                                "This is an open-source project licensed under the GNU General Public License v3.0.\n"
+                                "For updates, issues, or contributions, please visit:\n"
+                                "https://github.com/navalpablo/dicom_sorting_toolkit")
 
     def execute_sorting(self):
         input_dir = self.input_edit.text()
@@ -281,6 +322,9 @@ class DicomSortingGUI(QWidget):
         decompress = self.decompress_check.isChecked()
         skip_derived = self.skip_derived_check.isChecked()
         skip_burned = self.skip_burned_check.isChecked()
+        id_from_name = self.id_from_name_check.isChecked()
+        anonymize_birth_date = self.anonymize_birth_date_check.isChecked()
+        anonymize_acquisition_date = self.anonymize_acquisition_date_check.isChecked()
 
         if not input_dir or not output_dir:
             QMessageBox.warning(self, "Error", "Please select both input and output directories.")
@@ -294,12 +338,12 @@ class DicomSortingGUI(QWidget):
         self.progress_dialog.show()
 
         self.sorting_thread = SortingThread(input_dir, output_dir, basic_anonymize or strict_anonymize, 
-                                            id_map, decompress, strict_anonymize, skip_derived, skip_burned)
+                                            id_map, decompress, strict_anonymize, skip_derived, skip_burned, 
+                                            id_from_name, anonymize_birth_date, anonymize_acquisition_date)
         self.sorting_thread.progress.connect(self.update_sorting_progress)
         self.sorting_thread.finished.connect(self.sorting_finished)
         self.sorting_thread.error.connect(self.sorting_error)
         self.sorting_thread.start()
-
 
     def cancel_sorting(self):
         if self.sorting_thread and self.sorting_thread.isRunning():
@@ -337,7 +381,7 @@ class DicomSortingGUI(QWidget):
         self.decomp_thread = DecompressionThread(input_dir)
         self.decomp_thread.progress.connect(self.update_progress)
         self.decomp_thread.finished.connect(self.decompression_finished)
-        self.decomp_thread.error.connect(self.decompression_error)  # Add this line
+        self.decomp_thread.error.connect(self.decompression_error)
         self.decomp_thread.start()
 
         self.progress_dialog = QProgressDialog("Decompressing DICOM files...", "Cancel", 0, 100, self)
@@ -346,20 +390,23 @@ class DicomSortingGUI(QWidget):
         self.progress_dialog.canceled.connect(self.decomp_thread.terminate)
         self.progress_dialog.show()
 
+    def update_progress(self, value):
+        if self.progress_dialog:
+            self.progress_dialog.setValue(value)
+
+    def decompression_finished(self):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        QMessageBox.information(self, "Success", "In-place decompression completed successfully.")
+        self.decomp_thread = None
+        self.progress_dialog = None
+
     def decompression_error(self, error_message):
         if self.progress_dialog:
             self.progress_dialog.close()
         QMessageBox.critical(self, "Error", f"An error occurred during decompression: {error_message}")
         self.decomp_thread = None
         self.progress_dialog = None
-
-    def update_progress(self, value):
-        self.progress_dialog.setValue(value)
-
-    def decompression_finished(self):
-        self.progress_dialog.close()
-        QMessageBox.information(self, "Success", "In-place decompression completed successfully.")
-
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
