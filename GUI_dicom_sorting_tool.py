@@ -70,7 +70,7 @@ class SortingThread(QThread):
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned, id_from_name, anonymize_birth_date, anonymize_acquisition_date):
+    def __init__(self, input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession):
         QThread.__init__(self)
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -83,14 +83,18 @@ class SortingThread(QThread):
         self.id_from_name = id_from_name
         self.anonymize_birth_date = anonymize_birth_date
         self.anonymize_acquisition_date = anonymize_acquisition_date
-        self.cancel_flag = multiprocessing.Value('b', False)
+        self.preserve_private_tags = preserve_private_tags
+        self.anonymize_accession = anonymize_accession
+        self.cancel_flag = multiprocessing.Value('b', False)        
 
     def run(self):
         try:
             sort_dicom(self.input_dir, self.output_dir, self.anonymize, self.id_map, 
                        self.decompress, self.strict_anonymize, self.skip_derived, 
                        self.skip_burned, self.id_from_name, self.anonymize_birth_date,
-                       self.anonymize_acquisition_date, progress_callback=self.progress.emit,
+                       self.anonymize_acquisition_date, self.preserve_private_tags,
+                       self.anonymize_accession,
+                       progress_callback=self.progress.emit,
                        cancel_flag=self.cancel_flag)
             if not self.cancel_flag.value:
                 self.finished.emit()
@@ -111,7 +115,6 @@ class DicomSortingGUI(QWidget):
         # Set up logging
         logging.basicConfig(filename='dicom_sorting_gui.log', level=logging.DEBUG,
                             format='%(asctime)s - %(levelname)s - %(message)s')
-
     def initUI(self):
         layout = QVBoxLayout()
 
@@ -148,6 +151,7 @@ class DicomSortingGUI(QWidget):
         self.anon_group.addButton(self.no_anon_radio)
         self.anon_group.addButton(self.basic_anon_radio)
         self.anon_group.addButton(self.strict_anon_radio)
+        self.no_anon_radio.setChecked(True)  # Set default
         anon_layout.addWidget(self.no_anon_radio)
         anon_layout.addWidget(self.basic_anon_radio)
         anon_layout.addWidget(self.strict_anon_radio)
@@ -176,10 +180,16 @@ class DicomSortingGUI(QWidget):
         # Other options
         self.decompress_check = QCheckBox("Decompress")
         sorting_layout.addWidget(self.decompress_check)
+
         self.skip_derived_check = QCheckBox("Skip Secondary/Derived Images")
         sorting_layout.addWidget(self.skip_derived_check)
+
         self.skip_burned_check = QCheckBox("Skip Burned-in Images")
         sorting_layout.addWidget(self.skip_burned_check)
+
+        # Preserve Private Tags option
+        self.preserve_private_tags_check = QCheckBox("Preserve Private Tags in Strict Anonymization")
+        sorting_layout.addWidget(self.preserve_private_tags_check)
 
         # Birth Date Anonymization
         self.anonymize_birth_date_check = QCheckBox("Anonymize Birth Date to January 1st")
@@ -188,6 +198,10 @@ class DicomSortingGUI(QWidget):
         # Acquisition Date Anonymization
         self.anonymize_acquisition_date_check = QCheckBox("Anonymize Acquisition Date to January 1st")
         sorting_layout.addWidget(self.anonymize_acquisition_date_check)
+
+        # Accession Number Anonymization
+        self.anonymize_accession_check = QCheckBox("Anonymize Accession Number")
+        sorting_layout.addWidget(self.anonymize_accession_check)
 
         # Execute button
         execute_button = QPushButton("Execute Sorting")
@@ -223,7 +237,6 @@ class DicomSortingGUI(QWidget):
         help_button = QPushButton("Help")
         help_button.clicked.connect(self.show_help)
         layout.addWidget(help_button)
-
 
         # Add developer information and disclaimer
         info_label = QLabel("Developed by Pablo Naval Baudin 2024, though coded practically in full by Claude 3.5 Sonnet")
@@ -268,20 +281,20 @@ class DicomSortingGUI(QWidget):
             "No Anonymization: No changes to patient information.\n\n"
             "Basic Anonymization:\n"
             "- Anonymizes: PatientName, PatientID\n"
-            "- If no ID correlation file is provided, a random 8-character code will be assigned as the new PatientID\n\n"
+            "- If no ID correlation file is provided, a random 8-character code will be assigned as the new PatientID\n\n"            
             "Strict Anonymization:\n"
             "- Includes all Basic Anonymization changes\n"
             "- Additionally anonymizes all tags starting with 'Patient'\n"
             "- Removes all private tags\n"
             "- Generates dummy UIDs for: StudyInstanceUID, SeriesInstanceUID, SOPInstanceUID\n"
-            "- Anonymizes Accession Number with a random 16-digit number\n"
             "- Eliminates most private tags. Preserves prepulse IR delay for TFE sequences\n\n"
-            "Additional Anonymization Options:\n"
+            "Additional Options:\n"
             "- Anonymize Birth Date: Sets PatientBirthDate to January 1st of the same year\n"
-            "- Anonymize Acquisition Date: Sets AcquisitionDate to January 1st of the same year\n\n"
+            "- Anonymize Acquisition Date: Sets AcquisitionDate to January 1st of the same year\n"
+            "- Anonymize Accession Number with a random 16-digit number\n"
+            "- Preserve Private Tags: Keeps private tags even in strict anonymization mode\n\n"
             "Note: If an ID correlation file is provided, it will be used to map old PatientIDs to new ones. "
             "If no correlation is provided, a consistent random code will be generated for each unique PatientID.")
-
 
     def show_id_info(self):
         QMessageBox.information(self, "ID Correlation File Info",
@@ -314,36 +327,40 @@ class DicomSortingGUI(QWidget):
                                 "https://github.com/navalpablo/dicom_sorting_toolkit")
 
     def execute_sorting(self):
-        input_dir = self.input_edit.text()
-        output_dir = self.output_edit.text()
-        basic_anonymize = self.basic_anon_radio.isChecked()
-        strict_anonymize = self.strict_anon_radio.isChecked()
-        id_map = read_id_correlation(self.id_edit.text()) if self.id_edit.text() else None
-        decompress = self.decompress_check.isChecked()
-        skip_derived = self.skip_derived_check.isChecked()
-        skip_burned = self.skip_burned_check.isChecked()
-        id_from_name = self.id_from_name_check.isChecked()
-        anonymize_birth_date = self.anonymize_birth_date_check.isChecked()
-        anonymize_acquisition_date = self.anonymize_acquisition_date_check.isChecked()
+            input_dir = self.input_edit.text()
+            output_dir = self.output_edit.text()
+            basic_anonymize = self.basic_anon_radio.isChecked()
+            strict_anonymize = self.strict_anon_radio.isChecked()
+            id_map = read_id_correlation(self.id_edit.text()) if self.id_edit.text() else None
+            decompress = self.decompress_check.isChecked()
+            skip_derived = self.skip_derived_check.isChecked()
+            skip_burned = self.skip_burned_check.isChecked()
+            id_from_name = self.id_from_name_check.isChecked()
+            anonymize_birth_date = self.anonymize_birth_date_check.isChecked()
+            anonymize_acquisition_date = self.anonymize_acquisition_date_check.isChecked()
+            preserve_private_tags = self.preserve_private_tags_check.isChecked()
+            anonymize_accession = self.anonymize_accession_check.isChecked()
 
-        if not input_dir or not output_dir:
-            QMessageBox.warning(self, "Error", "Please select both input and output directories.")
-            return
+            if not input_dir or not output_dir:
+                QMessageBox.warning(self, "Error", "Please select both input and output directories.")
+                return
 
-        self.progress_dialog = QProgressDialog("Sorting DICOM files...", "Cancel", 0, 100, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setAutoClose(False)
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.canceled.connect(self.cancel_sorting)
-        self.progress_dialog.show()
+            self.progress_dialog = QProgressDialog("Sorting DICOM files...", "Cancel", 0, 100, self)
+            self.progress_dialog.setWindowModality(Qt.WindowModal)
+            self.progress_dialog.setAutoClose(False)
+            self.progress_dialog.setValue(0)
+            self.progress_dialog.canceled.connect(self.cancel_sorting)
+            self.progress_dialog.show()
 
-        self.sorting_thread = SortingThread(input_dir, output_dir, basic_anonymize or strict_anonymize, 
-                                            id_map, decompress, strict_anonymize, skip_derived, skip_burned, 
-                                            id_from_name, anonymize_birth_date, anonymize_acquisition_date)
-        self.sorting_thread.progress.connect(self.update_sorting_progress)
-        self.sorting_thread.finished.connect(self.sorting_finished)
-        self.sorting_thread.error.connect(self.sorting_error)
-        self.sorting_thread.start()
+            self.sorting_thread = SortingThread(input_dir, output_dir, basic_anonymize or strict_anonymize, 
+                                                id_map, decompress, strict_anonymize, skip_derived, skip_burned, 
+                                                id_from_name, anonymize_birth_date, anonymize_acquisition_date,
+                                                preserve_private_tags, anonymize_accession)
+            self.sorting_thread.progress.connect(self.update_sorting_progress)
+            self.sorting_thread.finished.connect(self.sorting_finished)
+            self.sorting_thread.error.connect(self.sorting_error)
+            self.sorting_thread.start()
+
 
     def cancel_sorting(self):
         if self.sorting_thread and self.sorting_thread.isRunning():
