@@ -263,7 +263,7 @@ class DicomSortingGUI(QWidget):
         layout.addWidget(license_label)
 
         self.setLayout(layout)
-        self.setWindowTitle('DICOM Sorting Toolkit v0.1.1')
+        self.setWindowTitle('DICOM Sorting Toolkit v0.1.2')
         self.show()
 
     def browse_directory(self, line_edit):
@@ -308,24 +308,24 @@ class DicomSortingGUI(QWidget):
 
     def show_help(self):
         QMessageBox.information(self, "Help",
-                                "This tool provides two main functions:\n\n"
-                                "1. DICOM Sorting: Organizes and optionally anonymizes DICOM files.\n"
-                                "   - Select input and output directories\n"
-                                "   - Choose anonymization level\n"
-                                "   - Optionally provide an ID correlation file\n"
-                                "   - Choose to read original ID from PatientName or PatientID\n"
-                                "   - Select additional options (decompression, skipping certain images)\n"
-                                "   - Choose to anonymize Birth Date and/or Acquisition Date\n"
-                                "   - Files are sorted into the following structure:\n"
-                                "     PatientID/StudyDate/SeriesNumber_SeriesDescription/\n\n"
-                                "2. In-place Decompression: Decompresses DICOM files in their original location.\n"
-                                "   - Select the directory containing DICOM files\n"
-                                "   - The tool will recursively find and decompress all DICOM files\n\n"
-                                "For more detailed information, click the '?' buttons next to specific options.\n\n"
-                                "This is an open-source project licensed under the GNU General Public License v3.0.\n"
-                                "For updates, issues, or contributions, please visit:\n"
-                                "https://github.com/navalpablo/dicom_sorting_toolkit")
-
+                    "This tool provides two main functions:\n\n"
+                    "1. DICOM Sorting: Organizes and optionally anonymizes DICOM files.\n"
+                    "   - Select input and output directories\n"
+                    "   - Choose anonymization level\n"
+                    "   - Optionally provide an ID correlation file\n"
+                    "   - Choose to read original ID from PatientName or PatientID\n"
+                    "   - Select additional options (decompression, skipping certain images)\n"
+                    "   - Choose to anonymize Birth Date and/or Acquisition Date\n"
+                    "   - Files are sorted into the following structure:\n"
+                    "     PatientID/StudyDate_StudyTime_StudyDescription/SeriesNumber_SeriesDescription_SeriesTime/\n\n"
+                    "2. In-place Decompression: Decompresses DICOM files in their original location.\n"
+                    "   - Select the directory containing DICOM files\n"
+                    "   - The tool will recursively find and decompress all DICOM files\n\n"
+                    "For more detailed information, click the '?' buttons next to specific options.\n\n"
+                    "This is an open-source project licensed under the GNU General Public License v3.0.\n"
+                    "For updates, issues, or contributions, please visit:\n"
+                    "https://github.com/navalpablo/dicom_sorting_toolkit")
+                    
     def execute_sorting(self):
             input_dir = self.input_edit.text()
             output_dir = self.output_edit.text()

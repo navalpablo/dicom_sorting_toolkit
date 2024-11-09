@@ -35,6 +35,75 @@ def get_dicom_attribute(dataset, attribute):
     except AttributeError:
         return 'UNKNOWN'
 
+def sanitize_study_description(description):
+    description = description.replace(' ', '_').replace('*', '').replace('.', '_')
+    invalid_chars = r'<>:"/\|?*'
+    description = re.sub(f'[{re.escape(invalid_chars)}]', '', description)
+    return sanitize_filepath(description, platform='auto')
+
+def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=None, decompress=False, strict_anonymize=False, id_from_name=False, anonymize_birth_date=False, anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False):
+    non_dicom_extensions = ['.png', '.jpeg', '.jpg', '.gif', '.bmp']
+    if any(src_file.lower().endswith(ext) for ext in non_dicom_extensions):
+        return
+
+    try:
+        dataset = pydicom.dcmread(src_file)
+    except Exception as e:
+        logging.error(f'Error reading DICOM file {src_file}: {str(e)}')
+        return
+
+    if anonymize or id_map:
+        dataset = anonymize_dicom_tags(dataset, id_map, strict_anonymize, id_from_name, 
+                                     anonymize_birth_date, anonymize_acquisition_date, 
+                                     preserve_private_tags, anonymize_accession)
+
+    if decompress:
+        dataset = decompress_dataset(dataset)
+
+    # Get time attributes
+    study_time = get_dicom_attribute(dataset, 'StudyTime')[:6]  # Get HHMMSS format
+    series_time = get_dicom_attribute(dataset, 'SeriesTime')[:6]  # Get HHMMSS format
+
+    # Get and sanitize study description
+    study_description = sanitize_study_description(get_dicom_attribute(dataset, 'StudyDescription'))
+
+    # Combine SeriesNumber, SeriesDescription, and SeriesTime
+    series_number = get_dicom_attribute(dataset, 'SeriesNumber').zfill(3)  # Pad with zeros
+    series_description = sanitize_series_description(get_dicom_attribute(dataset, 'SeriesDescription'))
+    series_dir = f"{series_number}_{series_description}_{series_time}"
+
+    # Handle StudyDate, StudyTime, and StudyDescription for folder structure
+    study_date = get_dicom_attribute(dataset, 'StudyDate')
+    if anonymize_acquisition_date and study_date != 'UNKNOWN':
+        # If acquisition date is anonymized, use YYYY0101 format for the folder
+        study_date = study_date[:4] + '0101'
+        study_time = '000000'  # Reset time for anonymization
+    
+    study_datetime = f"{study_date}_{study_time}_{study_description}"
+
+    # Replace placeholders in the pattern
+    pattern = pattern.replace('%PatientID%', get_dicom_attribute(dataset, 'PatientID'))
+    pattern = pattern.replace('%StudyDateTime%', study_datetime)
+    pattern = pattern.replace('%SeriesDescription%', series_dir)
+
+    dest_directory = sanitize_filepath(os.path.join(dest_base_dir, pattern), platform='auto')
+    os.makedirs(dest_directory, exist_ok=True)
+    
+    unique_filename = generate_unique_filename(dest_directory, os.path.basename(src_file))
+    dataset.save_as(os.path.join(dest_directory, unique_filename))
+
+def sort_dicom(input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, 
+               skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, 
+               preserve_private_tags, anonymize_accession=False, progress_callback=None, cancel_flag=None):
+    pattern = '%PatientID%/%StudyDateTime%/%SeriesDescription%'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    copy_directory(input_dir, output_dir, pattern, anonymize, id_map, decompress, strict_anonymize, 
+                   skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, 
+                   anonymize_acquisition_date, preserve_private_tags, anonymize_accession,
+                   progress_callback, cancel_flag)
+
+
 def read_id_correlation(file_path):
     id_map = {}
     if file_path:
@@ -205,46 +274,6 @@ def has_burned_in_annotation(dataset):
     return dataset.get('BurnedInAnnotation', '').upper() == 'YES'
 
 
-def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=None, decompress=False, strict_anonymize=False, id_from_name=False, anonymize_birth_date=False, anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False):
-    non_dicom_extensions = ['.png', '.jpeg', '.jpg', '.gif', '.bmp']
-    if any(src_file.lower().endswith(ext) for ext in non_dicom_extensions):
-        return
-
-    try:
-        dataset = pydicom.dcmread(src_file)
-    except Exception as e:
-        logging.error(f'Error reading DICOM file {src_file}: {str(e)}')
-        return
-
-    if anonymize or id_map:
-        dataset = anonymize_dicom_tags(dataset, id_map, strict_anonymize, id_from_name, 
-                                     anonymize_birth_date, anonymize_acquisition_date, 
-                                     preserve_private_tags, anonymize_accession)
-
-    if decompress:
-        dataset = decompress_dataset(dataset)
-
-    # Combine SeriesNumber and SeriesDescription
-    series_number = get_dicom_attribute(dataset, 'SeriesNumber').zfill(3)  # Pad with zeros to ensure proper sorting
-    series_description = sanitize_series_description(get_dicom_attribute(dataset, 'SeriesDescription'))
-    series_dir = f"{series_number}_{series_description}"
-
-    # Handle StudyDate for folder structure
-    study_date = get_dicom_attribute(dataset, 'StudyDate')
-    if anonymize_acquisition_date and study_date != 'UNKNOWN':
-        # If acquisition date is anonymized, use YYYY0101 format for the folder
-        study_date = study_date[:4] + '0101'
-
-    # Replace placeholders in the pattern
-    pattern = pattern.replace('%PatientID%', get_dicom_attribute(dataset, 'PatientID'))
-    pattern = pattern.replace('%StudyDate%', study_date)
-    pattern = pattern.replace('%SeriesDescription%', series_dir)
-
-    dest_directory = sanitize_filepath(os.path.join(dest_base_dir, pattern), platform='auto')
-    os.makedirs(dest_directory, exist_ok=True)
-    
-    unique_filename = generate_unique_filename(dest_directory, os.path.basename(src_file))
-    dataset.save_as(os.path.join(dest_directory, unique_filename))
     
 def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession, progress_callback=None, cancel_flag=None):
     all_files = [os.path.join(root, file) for root, _, files in os.walk(src_dir) for file in files]
@@ -272,16 +301,7 @@ def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, st
     print(f"\nProcessing completed. Successes: {success_count}, Failures: {failure_count}")
     logging.info(f"Processing completed. Successes: {success_count}, Failures: {failure_count}")
     
-def sort_dicom(input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, 
-               skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, 
-               preserve_private_tags, anonymize_accession=False, progress_callback=None, cancel_flag=None):
-    pattern = '%PatientID%/%StudyDate%/%SeriesDescription%'
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    copy_directory(input_dir, output_dir, pattern, anonymize, id_map, decompress, strict_anonymize, 
-                   skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, 
-                   anonymize_acquisition_date, preserve_private_tags, anonymize_accession,
-                   progress_callback, cancel_flag)
+
 
 def process_file(args):
     file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession = args
