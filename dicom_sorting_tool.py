@@ -11,6 +11,8 @@ from datetime import datetime
 import hashlib
 import warnings
 import random
+import pandas as pd  # Ensure pandas is imported
+
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydicom.valuerep")
@@ -35,17 +37,33 @@ def get_dicom_attribute(dataset, attribute):
     except AttributeError:
         return 'UNKNOWN'
 
+import pandas as pd  # Ensure pandas is imported
+
 def read_id_correlation(file_path):
     id_map = {}
     if file_path:
-        with open(file_path, 'r') as file:
-            for line in file:
-                parts = re.split(r',|\s|\t', line.strip())
-                if len(parts) >= 2:
-                    old_id, new_id = parts[0], parts[1]
-                    id_map[old_id] = new_id
-                else:
-                    logging.warning(f"Invalid line format: {line}")
+        try:
+            # Check file type and read accordingly
+            if file_path.endswith('.tsv'):
+                df = pd.read_csv(file_path, sep='\t', header=None)
+            elif file_path.endswith('.csv'):
+                df = pd.read_csv(file_path, header=None)
+            elif file_path.endswith('.xls') or file_path.endswith('.xlsx'):
+                df = pd.read_excel(file_path, header=None)
+            else:
+                raise ValueError("Unsupported file format. Please use TSV, CSV, or Excel files.")
+            
+            # Validate the file structure
+            if len(df.columns) < 2:
+                raise ValueError("The input file must have at least two columns: oldID and newID.")
+            
+            # Populate the ID map
+            for _, row in df.iterrows():
+                old_id, new_id = row[0], row[1]
+                id_map[old_id] = new_id
+
+        except Exception as e:
+            logging.error(f"Error reading ID correlation file: {str(e)}")
     return id_map
 
 def generate_dummy_date(original_date, anonymize_to_first_of_year=False):

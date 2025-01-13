@@ -250,7 +250,7 @@ class DicomSortingGUI(QWidget):
         layout.addWidget(license_label)
 
         self.setLayout(layout)
-        self.setWindowTitle('DICOM Sorting Toolkit v0.1.2')
+        self.setWindowTitle('DICOM Sorting Toolkit v0.1.3')
         self.show()
 
     def browse_directory(self, line_edit):
@@ -285,7 +285,7 @@ class DicomSortingGUI(QWidget):
 
     def show_id_info(self):
         QMessageBox.information(self, "ID Correlation File Info",
-                                "The ID correlation file should be a TSV (Tab-Separated Values) file with two columns:\n\n"
+                                "The ID correlation file should be an EXCEL or TSV (Tab-Separated Values) file with two columns:\n\n"
                                 "Column 1: Original Patient ID\n"
                                 "Column 2: New Patient ID\n\n"
                                 "Example:\n"
