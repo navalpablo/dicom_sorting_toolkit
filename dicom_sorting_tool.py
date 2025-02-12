@@ -11,8 +11,6 @@ from datetime import datetime
 import hashlib
 import warnings
 import random
-import pandas as pd  # Ensure pandas is imported
-
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydicom.valuerep")
@@ -37,33 +35,17 @@ def get_dicom_attribute(dataset, attribute):
     except AttributeError:
         return 'UNKNOWN'
 
-import pandas as pd  # Ensure pandas is imported
-
 def read_id_correlation(file_path):
     id_map = {}
     if file_path:
-        try:
-            # Check file type and read accordingly
-            if file_path.endswith('.tsv'):
-                df = pd.read_csv(file_path, sep='\t', header=None)
-            elif file_path.endswith('.csv'):
-                df = pd.read_csv(file_path, header=None)
-            elif file_path.endswith('.xls') or file_path.endswith('.xlsx'):
-                df = pd.read_excel(file_path, header=None)
-            else:
-                raise ValueError("Unsupported file format. Please use TSV, CSV, or Excel files.")
-            
-            # Validate the file structure
-            if len(df.columns) < 2:
-                raise ValueError("The input file must have at least two columns: oldID and newID.")
-            
-            # Populate the ID map
-            for _, row in df.iterrows():
-                old_id, new_id = row[0], row[1]
-                id_map[old_id] = new_id
-
-        except Exception as e:
-            logging.error(f"Error reading ID correlation file: {str(e)}")
+        with open(file_path, 'r') as file:
+            for line in file:
+                parts = re.split(r',|\s|\t', line.strip())
+                if len(parts) >= 2:
+                    old_id, new_id = parts[0], parts[1]
+                    id_map[old_id] = new_id
+                else:
+                    logging.warning(f"Invalid line format: {line}")
     return id_map
 
 def generate_dummy_date(original_date, anonymize_to_first_of_year=False):
@@ -99,13 +81,27 @@ def generate_dummy_uid(original_uid):
 def generate_dummy_accession_number():
     return ''.join([str(random.randint(0, 9)) for _ in range(16)])
 
-def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False, anonymize_birth_date=False, anonymize_acquisition_date=False):
+def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False, anonymize_birth_date=False, 
+                        anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False):
     # List of tags to preserve in both basic and strict anonymization
     preserved_tags = [
         "00080070", "00081090", "00181030", "00189423", "00080020", "00180087",
         "00080080", "00200011", "0008103E", "00540081", "00181310", "00280030",
         "00180088", "00180050", "00180080", "00180081", "00180086", "00180091",
-        "00180082", "00181314", "00080008", "00189073", "2001101B", "200110C8"
+        "00180082", "00181314", "00080008", "00189073", "2001101B", "200110C8",
+    #tags for dynamic studies
+        "00080032", "00080033", "00200100", "00200110", "00209111", "00189074",
+        # Add these Philips private tags that seem important for dynamic studies
+        "20050010", # Philips MR Imaging DD 001
+        "20050014", # Philips MR Imaging DD 005 
+        "20051404", # Remapped from 2005,1004
+        "20051406", # Remapped from 2005,1006
+        "20010010", # Philips Imaging DD 001
+        "20010011", # Philips Imaging DD 002
+        "20010090", # Philips Imaging DD 129
+        "20051000", "20051001", "20051002", 
+        "20051008", "20051009", "2005100a", 
+        "20051355"  
     ]
 
     # Store values of preserved tags
@@ -130,40 +126,52 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
     if 'AcquisitionDate' in dataset and anonymize_acquisition_date:
         dataset.AcquisitionDate = generate_dummy_date(dataset.AcquisitionDate, anonymize_to_first_of_year=True)
 
+    # Handle Accession Number only if anonymization is requested
+    if anonymize_accession and '00080050' in dataset:
+        dataset.AccessionNumber = generate_dummy_accession_number()
+
     if strict:
-        # Remove all private tags
-        dataset.remove_private_tags()
-        
-        # Anonymize other potentially identifying information
-        for tag in dataset.dir():
-            if tag not in preserved_tags:
-                if tag.startswith('Patient'):
-                    if tag in ['PatientID', 'PatientName', 'PatientBirthDate']:
-                        continue  # We've already handled these above
-                    elif tag in ['PatientSex', 'PatientAge', 'PatientWeight', 'PatientSize']:
-                        if tag == 'PatientSex':
+            # Remove all private tags unless preserve_private_tags is True
+            if not preserve_private_tags:
+                dataset.remove_private_tags()
+            
+            # List of UIDs to preserve for dynamic studies
+            preserved_uids = ['StudyInstanceUID', 'SeriesInstanceUID', 'FrameOfReferenceUID']
+            
+            # Anonymize other potentially identifying information
+            for tag in dataset.dir():
+                if tag not in preserved_tags:
+                    # Handle Patient-related tags
+                    if tag.startswith('Patient'):
+                        if tag in ['PatientID', 'PatientName', 'PatientBirthDate']:
+                            continue  # Already handled these above
+                        elif tag == 'PatientSex':
                             setattr(dataset, tag, 'O')  # 'O' for Other/Unknown
                         elif tag == 'PatientAge':
                             setattr(dataset, tag, '000Y')  # Set to unknown age
-                        else:
+                        elif tag in ['PatientWeight', 'PatientSize']:
                             setattr(dataset, tag, '')  # Clear weight and size
-                    elif 'Date' in tag:
-                        setattr(dataset, tag, generate_dummy_date(getattr(dataset, tag)))
-                    elif 'ID' in tag:
-                        setattr(dataset, tag, generate_dummy_id(getattr(dataset, tag)))
-                    else:
-                        setattr(dataset, tag, "ANONYMIZED")
-                elif tag.endswith('UID'):
-                    original_uid = getattr(dataset, tag)
-                    setattr(dataset, tag, generate_dummy_uid(original_uid))
-                elif tag == '00080050':  # Accession Number
-                    setattr(dataset, tag, generate_dummy_accession_number())
-
+                        elif 'Date' in tag:
+                            setattr(dataset, tag, generate_dummy_date(getattr(dataset, tag)))
+                        elif 'ID' in tag:
+                            setattr(dataset, tag, generate_dummy_id(getattr(dataset, tag)))
+                        else:
+                            setattr(dataset, tag, "ANONYMIZED")
+                    
+                    # Handle UIDs
+                    elif tag.endswith('UID'):
+                        if tag in preserved_uids:
+                            continue  # Skip modifying these critical UIDs
+                        original_uid = getattr(dataset, tag)
+                        setattr(dataset, tag, generate_dummy_uid(original_uid))
+                        
     # Restore preserved tags
     for tag, value in preserved_values.items():
         setattr(dataset, tag, value)
 
     return dataset
+    
+    
 
 def generate_unique_filename(directory, filename):
     base_name, extension = os.path.splitext(filename)
@@ -187,14 +195,6 @@ def decompress_dataset(dataset):
         logging.error(f"Error decompressing dataset: {str(e)}")
     return dataset
 
-def is_derived_image(dataset):
-    if 'ImageType' in dataset:
-        image_type = dataset.ImageType
-        if 'Manufacturer' in dataset:
-            manufacturer = dataset.Manufacturer
-            return ('PRIMARY' not in image_type) or ('DERIVED' in image_type) or ('SECONDARY' in image_type) or ('PROJECTION' in image_type) or ('RCBV' in image_type) or ('Philips' not in manufacturer)
-        return False  # If Manufacturer is not present, assume it's not derived
-    return False  # If ImageType is not present, assume it's not derived
 
 def is_derived_image(dataset):
     if 'ImageType' in dataset:
@@ -215,12 +215,11 @@ def is_derived_image(dataset):
         return False  # If Manufacturer is not present, assume it's not derived
     return False  # If ImageType is not present, assume it's not derived
 
-
-
 def has_burned_in_annotation(dataset):
     return dataset.get('BurnedInAnnotation', '').upper() == 'YES'
 
-def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=None, decompress=False, strict_anonymize=False, id_from_name=False, anonymize_birth_date=False, anonymize_acquisition_date=False):
+
+def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=None, decompress=False, strict_anonymize=False, id_from_name=False, anonymize_birth_date=False, anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False):
     non_dicom_extensions = ['.png', '.jpeg', '.jpg', '.gif', '.bmp']
     if any(src_file.lower().endswith(ext) for ext in non_dicom_extensions):
         return
@@ -232,21 +231,17 @@ def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=N
         return
 
     if anonymize or id_map:
-        dataset = anonymize_dicom_tags(dataset, id_map, strict_anonymize, id_from_name, anonymize_birth_date, anonymize_acquisition_date)
+        dataset = anonymize_dicom_tags(dataset, id_map, strict_anonymize, id_from_name, 
+                                     anonymize_birth_date, anonymize_acquisition_date, 
+                                     preserve_private_tags, anonymize_accession)
 
     if decompress:
         dataset = decompress_dataset(dataset)
 
     # Combine SeriesNumber and SeriesDescription
-
-    study_time = get_dicom_attribute(dataset, 'StudyTime')
-    study_description = sanitize_series_description(get_dicom_attribute(dataset, 'StudyDescription'))
-
-
-
     series_number = get_dicom_attribute(dataset, 'SeriesNumber').zfill(3)  # Pad with zeros to ensure proper sorting
     series_description = sanitize_series_description(get_dicom_attribute(dataset, 'SeriesDescription'))
-    series_dir = f"{series_number}_{series_description}"  # Remove any %SeriesTime% from here
+    series_dir = f"{series_number}_{series_description}"
 
     # Handle StudyDate for folder structure
     study_date = get_dicom_attribute(dataset, 'StudyDate')
@@ -254,46 +249,23 @@ def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=N
         # If acquisition date is anonymized, use YYYY0101 format for the folder
         study_date = study_date[:4] + '0101'
 
-
     # Replace placeholders in the pattern
     pattern = pattern.replace('%PatientID%', get_dicom_attribute(dataset, 'PatientID'))
     pattern = pattern.replace('%StudyDate%', study_date)
-    pattern = pattern.replace('%StudyTime%', study_time)
-    pattern = pattern.replace('%StudyDescription%', study_description)
     pattern = pattern.replace('%SeriesDescription%', series_dir)
-    #pattern = pattern.replace('%SeriesTime%', series_time)  # Add this line
-
 
     dest_directory = sanitize_filepath(os.path.join(dest_base_dir, pattern), platform='auto')
     os.makedirs(dest_directory, exist_ok=True)
     
-    unique_filename = generate_unique_filename(dest_directory, os.path.basename(src_file))
-    dataset.save_as(os.path.join(dest_directory, unique_filename))
-    
-def process_file(args):
-    file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date = args
-    try:
-        dataset = pydicom.dcmread(file)
-        
-        if skip_derived and is_derived_image(dataset):
-            logging.info(f"Skipping derived image: {file}")
-            return file, False
+    sop_instance_uid = get_dicom_attribute(dataset, 'SOPInstanceUID')
+    new_filename = f"{sop_instance_uid}.dcm"
+    dataset.save_as(os.path.join(dest_directory, new_filename))
 
-        if skip_burned_in and has_burned_in_annotation(dataset):
-            logging.info(f"Skipping image with burned-in annotation: {file}")
-            return file, False
-
-        copy_dicom_image(file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, id_from_name, anonymize_birth_date, anonymize_acquisition_date)
-        return file, True
-    except Exception as e:
-        logging.error(f"Error processing file {file}: {str(e)}")
-        return file, False
-
-def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, progress_callback=None, cancel_flag=None):
+def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession, progress_callback=None, cancel_flag=None):
     all_files = [os.path.join(root, file) for root, _, files in os.walk(src_dir) for file in files]
     total_files = len(all_files)
     
-    args_list = [(file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date) for file in all_files]
+    args_list = [(file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession) for file in all_files]
 
     success_count = 0
     failure_count = 0
@@ -314,19 +286,42 @@ def copy_directory(src_dir, dest_dir, pattern, anonymize, id_map, decompress, st
 
     print(f"\nProcessing completed. Successes: {success_count}, Failures: {failure_count}")
     logging.info(f"Processing completed. Successes: {success_count}, Failures: {failure_count}")
-
-def sort_dicom(input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, progress_callback=None, cancel_flag=None):
-    pattern = '%PatientID%/%StudyDate%_%StudyTime%_%StudyDescription%/%SeriesDescription%'
-
-
+    
+def sort_dicom(input_dir, output_dir, anonymize, id_map, decompress, strict_anonymize, skip_derived, 
+               skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, 
+               preserve_private_tags, anonymize_accession=False, progress_callback=None, cancel_flag=None):
+    pattern = '%PatientID%/%StudyDate%/%SeriesDescription%'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    copy_directory(input_dir, output_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, progress_callback, cancel_flag)
+    copy_directory(input_dir, output_dir, pattern, anonymize, id_map, decompress, strict_anonymize, 
+                   skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, 
+                   anonymize_acquisition_date, preserve_private_tags, anonymize_accession,
+                   progress_callback, cancel_flag)
 
-missing_ids = set()
+def process_file(args):
+    file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession = args
+    try:
+        dataset = pydicom.dcmread(file)
+        
+        if skip_derived and is_derived_image(dataset):
+            logging.info(f"Skipping derived image: {file}")
+            return file, False
 
+        if skip_burned_in and has_burned_in_annotation(dataset):
+            logging.info(f"Skipping image with burned-in annotation: {file}")
+            return file, False
+
+        copy_dicom_image(file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, 
+                        id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags,
+                        anonymize_accession)
+        return file, True
+    except Exception as e:
+        logging.error(f"Error processing file {file}: {str(e)}")
+        return file, False
+        
+        
 def main():
-    parser = argparse.ArgumentParser(description="This script copies, optionally anonymizes, and optionally decompresses DICOM files into a structured directory. It can also replace PatientID based on a correlation file.",
+    parser = argparse.ArgumentParser(description="This script copies, optionally anonymizes, and optionally decompresses DICOM files into a structured directory.", 
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--dicomin', type=str, required=True, help='Path to the input directory containing unsorted DICOM files.')
     parser.add_argument('--dicomout', type=str, required=True, help='Path to the output directory where structured and optionally anonymized DICOM files will be stored.')
@@ -339,11 +334,14 @@ def main():
     parser.add_argument('--id_from_name', action='store_true', help='If specified, reads the original ID from PatientName instead of PatientID for ID correlation.')
     parser.add_argument('--anonymize_birth_date', action='store_true', help='If specified, anonymizes the PatientBirthDate to January 1st of the same year.')
     parser.add_argument('--anonymize_acquisition_date', action='store_true', help='If specified, anonymizes the AcquisitionDate to January 1st of the same year.')
+    parser.add_argument('--preserve_private_tags', action='store_true', help='If specified, preserves private tags even in strict anonymization mode.')
+    parser.add_argument('--anonymize_accession', action='store_true', help='If specified, anonymizes the Accession Number with a random 16-digit number.')
     args = parser.parse_args()
 
     id_map = read_id_correlation(args.ID_correlation) if args.ID_correlation else None
 
     start_time = time.time()
+
     sort_dicom(args.dicomin, args.dicomout, 
                args.anonymize or args.anonymize_strict, 
                id_map, 
@@ -353,7 +351,10 @@ def main():
                args.skip_burned_in_images, 
                args.id_from_name,
                args.anonymize_birth_date,
-               args.anonymize_acquisition_date)
+               args.anonymize_acquisition_date,
+               args.preserve_private_tags,
+               args.anonymize_accession)
+
     end_time = time.time()
 
     print(f"Total processing time: {end_time - start_time:.2f} seconds")
