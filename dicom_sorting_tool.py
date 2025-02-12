@@ -190,8 +190,32 @@ def decompress_dataset(dataset):
 def is_derived_image(dataset):
     if 'ImageType' in dataset:
         image_type = dataset.ImageType
-        return ('PRIMARY' not in image_type) or ('DERIVED' in image_type) or ('SECONDARY' in image_type) or ('PROJECTION' in image_type)  or ('RCBV' in image_type)
+        if 'Manufacturer' in dataset:
+            manufacturer = dataset.Manufacturer
+            return ('PRIMARY' not in image_type) or ('DERIVED' in image_type) or ('SECONDARY' in image_type) or ('PROJECTION' in image_type) or ('RCBV' in image_type) or ('Philips' not in manufacturer)
+        return False  # If Manufacturer is not present, assume it's not derived
     return False  # If ImageType is not present, assume it's not derived
+
+def is_derived_image(dataset):
+    if 'ImageType' in dataset:
+        image_type = dataset.ImageType
+        if 'Manufacturer' in dataset:
+            manufacturer = dataset.Manufacturer
+            series_number = str(dataset.SeriesNumber) if 'SeriesNumber' in dataset else ''
+            is_derived = (
+                ('PRIMARY' not in image_type) or
+                ('DERIVED' in image_type) or
+                ('SECONDARY' in image_type) or
+                ('PROJECTION' in image_type) or
+                ('RCBV' in image_type) or
+                ('Philips' not in manufacturer) or
+                (not series_number.endswith('01'))
+            )
+            return is_derived
+        return False  # If Manufacturer is not present, assume it's not derived
+    return False  # If ImageType is not present, assume it's not derived
+
+
 
 def has_burned_in_annotation(dataset):
     return dataset.get('BurnedInAnnotation', '').upper() == 'YES'
