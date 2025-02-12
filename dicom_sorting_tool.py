@@ -190,7 +190,7 @@ def decompress_dataset(dataset):
 def is_derived_image(dataset):
     if 'ImageType' in dataset:
         image_type = dataset.ImageType
-        return ('PRIMARY' not in image_type) or ('DERIVED' in image_type) or ('SECONDARY' in image_type)
+        return ('PRIMARY' not in image_type) or ('DERIVED' in image_type) or ('SECONDARY' in image_type) or ('PROJECTION' in image_type)  or ('RCBV' in image_type)
     return False  # If ImageType is not present, assume it's not derived
 
 def has_burned_in_annotation(dataset):
