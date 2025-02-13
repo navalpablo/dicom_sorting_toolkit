@@ -195,25 +195,96 @@ def decompress_dataset(dataset):
         logging.error(f"Error decompressing dataset: {str(e)}")
     return dataset
 
+# def is_derived_image(dataset):
+#     if 'ImageType' in dataset:
+#         image_type = dataset.ImageType
+#         return ('PRIMARY' not in image_type) or ('DERIVED' in image_type) or ('SECONDARY' in image_type)
+#     return False  # If ImageType is not present, assume it's not derived
+# def is_derived_image(dataset):
+#     if 'ImageType' in dataset:
+#         image_type = dataset.ImageType
+#         manufacturer = str(dataset.Manufacturer) if 'Manufacturer' in dataset else ''
+#         series_number = str(dataset.SeriesNumber) if 'SeriesNumber' in dataset else ''
+#         protocol_name = str(dataset.ProtocolName).lower() if 'ProtocolName' in dataset else ''
+#         # is_derived = (
+#         #     ('PRIMARY' not in image_type) or
+#         #     ('DERIVED' in image_type) or
+#         #     ('SECONDARY' in image_type) or
+#         #     ('PROJECTION' in image_type) or
+#         #     ('RCBV' in image_type) or
+#         #     ('Philips' not in manufacturer) or
+#         #     (not series_number.endswith('01')) or
+#         #     ('surv' in protocol_name) 
+#         # )
+#         # return is_derived
+#         if 'PRIMARY' in image_type:
+#             return False
+#         if 'DERIVED' in image_type or 'SECONDARY' in image_type or 'PROJECTION' in image_type or 'RCBV' in image_type:
+#             return True
+#         if 'Philips' in manufacturer:
+#             return False
+#         if series_number.endswith('01'):
+#             return False
+#         if 'surv' in protocol_name:
+#             return True
+
+#     return False  # If ImageType is not present, assume it's not derived
 
 def is_derived_image(dataset):
-    if 'ImageType' in dataset:
-        image_type = dataset.ImageType
-        if 'Manufacturer' in dataset:
-            manufacturer = dataset.Manufacturer
-            series_number = str(dataset.SeriesNumber) if 'SeriesNumber' in dataset else ''
-            is_derived = (
-                ('PRIMARY' not in image_type) or
-                ('DERIVED' in image_type) or
-                ('SECONDARY' in image_type) or
-                ('PROJECTION' in image_type) or
-                ('RCBV' in image_type) or
-                ('Philips' not in manufacturer) or
-                (not series_number.endswith('01'))
-            )
-            return is_derived
-        return False  # If Manufacturer is not present, assume it's not derived
-    return False  # If ImageType is not present, assume it's not derived
+    image_type = dataset.ImageType if 'ImageType' in dataset else []
+    manufacturer = str(dataset.Manufacturer) if 'Manufacturer' in dataset else ''
+    series_number = str(dataset.SeriesNumber) if 'SeriesNumber' in dataset else ''
+    series_desc = str(dataset.SeriesDescription).upper() if 'SeriesDescription' in dataset else ''
+    
+    logging.info(f"Checking image: {series_desc}")
+    logging.info(f"ImageType: {image_type}")
+    logging.info(f"Manufacturer: {manufacturer}")
+    logging.info(f"SeriesNumber: {series_number}")
+    logging.info(f"SeriesDescription: {series_desc}")
+    
+    is_survey = (
+        'SURVEY' in series_desc or 
+        'SURV' in series_desc or
+        'SMARTBRAIN' in series_desc
+    )
+        
+    is_derived = (
+        ('PRIMARY' not in image_type) or
+        ('DERIVED' in image_type) or
+        ('SECONDARY' in image_type) or
+        ('PROJECTION' in image_type) or
+        ('RCBV' in image_type) or
+        ('Philips' not in manufacturer) or
+        (not series_number.endswith('01')) or
+        is_survey
+    )
+    
+    if is_derived:
+        reasons = []
+        if 'PRIMARY' not in image_type:
+            reasons.append('Not PRIMARY')
+        if 'DERIVED' in image_type:
+            reasons.append('DERIVED found')
+        if 'SECONDARY' in image_type:
+            reasons.append('SECONDARY found')
+        if 'PROJECTION' in image_type:
+            reasons.append('PROJECTION found')
+        if 'RCBV' in image_type:
+            reasons.append('RCBV found')
+        if 'Philips' not in manufacturer:
+            reasons.append('Not Philips')
+        if not series_number.endswith('01'):
+            reasons.append('Series not ending in 01')
+        if is_survey:
+            reasons.append('Survey image')
+
+                
+            logging.info(f"Image marked as derived because: {', '.join(reasons)}")
+    else:
+        logging.info("Image not marked as derived")
+        
+    return is_derived
+    
 
 def has_burned_in_annotation(dataset):
     return dataset.get('BurnedInAnnotation', '').upper() == 'YES'
@@ -225,7 +296,12 @@ def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=N
         return
 
     try:
-        dataset = pydicom.dcmread(src_file)
+        dataset = pydicom.dcmread(src_file, force=True)
+        logging.info(f"\nIn copy_dicom_image for file: {src_file}")
+        logging.info(f"Copy phase - Tags:")
+        logging.info(f"SeriesNumber: {dataset.get('SeriesNumber', 'NOT_FOUND')}")
+        logging.info(f"SeriesDescription: {dataset.get('SeriesDescription', 'NOT_FOUND')}")
+        
     except Exception as e:
         logging.error(f'Error reading DICOM file {src_file}: {str(e)}')
         return
@@ -301,11 +377,24 @@ def sort_dicom(input_dir, output_dir, anonymize, id_map, decompress, strict_anon
 def process_file(args):
     file, dest_dir, pattern, anonymize, id_map, decompress, strict_anonymize, skip_derived, skip_burned_in, id_from_name, anonymize_birth_date, anonymize_acquisition_date, preserve_private_tags, anonymize_accession = args
     try:
-        dataset = pydicom.dcmread(file)
+        dataset = pydicom.dcmread(file, force=True)
+        # series_desc = str(dataset.SeriesDescription) if 'SeriesDescription' in dataset else 'NO_DESC'
         
-        if skip_derived and is_derived_image(dataset):
-            logging.info(f"Skipping derived image: {file}")
-            return file, False
+        logging.info(f"\nProcessing file: {file}")
+        logging.info(f"Initial read - Tags:")
+        logging.info(f"SeriesNumber: {dataset.get('SeriesNumber', 'NOT_FOUND')}")
+        logging.info(f"SeriesDescription: {dataset.get('SeriesDescription', 'NOT_FOUND')}")
+        logging.info(f"ProtocolName: {dataset.get('ProtocolName', 'NOT_FOUND')}")
+        logging.info(f"ImageType: {dataset.get('ImageType', 'NOT_FOUND')}")
+        
+        if skip_derived:
+            is_derived = is_derived_image(dataset)
+            if is_derived:
+                logging.info(f"SKIPPING derived image")
+                return file, False
+            else:
+                logging.info(f"NOT derived, will process")
+
 
         if skip_burned_in and has_burned_in_annotation(dataset):
             logging.info(f"Skipping image with burned-in annotation: {file}")
