@@ -113,8 +113,21 @@ class DicomSortingGUI(QWidget):
         self.initUI()
 
         # Set up logging
-        logging.basicConfig(filename='dicom_sorting_gui.log', level=logging.DEBUG,
-                            format='%(asctime)s - %(levelname)s - %(message)s')
+
+        try:
+            # Get the user's home directory
+            home_dir = os.path.expanduser('~')
+            # Create a logs directory in the home directory
+            log_dir = os.path.join(home_dir, 'DICOM_Sorting_Logs')
+            os.makedirs(log_dir, exist_ok=True)
+            # Set up log file path
+            log_file = os.path.join(log_dir, 'dicom_sorting_gui.log')
+            logging.basicConfig(filename=log_file, level=logging.DEBUG,
+                              format='%(asctime)s - %(levelname)s - %(message)s')
+        except Exception as e:
+            print(f"Error setting up logging: {e}")
+
+
     def initUI(self):
         layout = QVBoxLayout()
 
