@@ -16,11 +16,20 @@ import random
 warnings.filterwarnings("ignore", category=UserWarning, module="pydicom.valuerep")
 
 # Set up logging
-log_file = 'dicom_processing.log'
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s',
-                    filename=log_file,
-                    filemode='w')
+try:
+    # Get the user's home directory
+    home_dir = os.path.expanduser('~')
+    # Create a logs directory in the home directory
+    log_dir = os.path.join(home_dir, 'DICOM_Sorting_Logs')
+    os.makedirs(log_dir, exist_ok=True)
+    # Set up log file path
+    log_file = os.path.join(log_dir, 'dicom_processing.log')
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        filename=log_file,
+                        filemode='w')
+except Exception as e:
+    print(f"Error setting up logging: {e}")
 
 # Add console handler for error messages only
 console = logging.StreamHandler()
