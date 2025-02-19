@@ -28,6 +28,8 @@ try:
                         format='%(asctime)s - %(levelname)s - %(message)s',
                         filename=log_file,
                         filemode='w')
+except Exception as e:
+    print(f"Error setting up logging: {e}")
 
 # Add console handler for error messages only
 console = logging.StreamHandler()
