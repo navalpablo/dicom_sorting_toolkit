@@ -74,13 +74,38 @@ def is_dicom_file(filepath):
     return None
 
 
+def normalize_sh(ds):
+    """
+    Recursively traverse the dataset and trim any SH (Short String) values
+    that exceed the 16-character limit.
+    """
+    for elem in ds:
+        if elem.VR == "SH" and isinstance(elem.value, str) and len(elem.value) > 16:
+            new_val = elem.value[:16]
+            logging.info(f"Trimming SH value of tag {elem.tag} from {elem.value} to {new_val}")
+            elem.value = new_val
+        elif elem.VR == "SQ":
+            for item in elem.value:
+                normalize_sh(item)
+    return ds
+
+from pydicom.uid import ExplicitVRLittleEndian
+
 def convert_to_explicit(ds):
     """
-    Convert dataset to use Explicit VR Little Endian if it is currently using Implicit VR.
+    Convert the dataset to use Explicit VR Little Endian.
+    If the dataset is compressed, decompress it first.
+    Then, normalize any SH (Short String) values to be 16 characters or less.
     """
-    if ds.is_implicit_VR:
-        ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-        ds.is_implicit_VR = False
+    if ds.file_meta.TransferSyntaxUID != ExplicitVRLittleEndian:
+        try:
+            ds.decompress()
+            logging.info("Decompressed dataset successfully.")
+        except Exception as e:
+            logging.error(f"Failed to decompress dataset: {e}")
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.is_implicit_VR = False
+    ds = normalize_sh(ds)
     return ds
 
 
