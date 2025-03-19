@@ -14,7 +14,7 @@ import random
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydicom.valuerep")
-
+missing_ids = set()
 # Set up logging
 log_file = 'dicom_processing.log'
 logging.basicConfig(level=logging.INFO,
@@ -242,43 +242,64 @@ def is_derived_image(dataset):
     logging.info(f"SeriesNumber: {series_number}")
     logging.info(f"SeriesDescription: {series_desc}")
     
+    if 'FLAIR' in series_desc:
+        logging.info(f"*** FLAIR image detected: {series_desc} ***")
+    
     is_survey = (
         'SURVEY' in series_desc or 
         'SURV' in series_desc or
-        'SMARTBRAIN' in series_desc
+        'SMART' in series_desc or
+        'SCOUT' in series_desc or
+        'SV' in series_desc 
     )
-        
+    
+    
+    
+    has_projection = any("PROJECTION" in item for item in image_type)
+    has_derived = any("DERIVED" in item for item in image_type)
+    has_primary = any("PRIMARY" in item for item in image_type)
+    has_RCBV = any("RCBV" in item for item in image_type)
+    has_secondary = any("SECONDARY" in item for item in image_type)
+    has_adc = any("ADC" in item for item in image_type)
+    
     is_derived = (
-        ('PRIMARY' not in image_type) or
-        ('DERIVED' in image_type) or
-        ('SECONDARY' in image_type) or
-        ('PROJECTION' in image_type) or
-        ('RCBV' in image_type) or
-        ('Philips' not in manufacturer) or
-        (not series_number.endswith('01')) or
+        not has_primary or
+        'Philips' not in manufacturer or
+        has_projection or
+        has_RCBV or
+        has_derived or
+        has_secondary or
+        has_adc or
+        'REG' in series_desc or
+        'ADC' in series_desc or
+       # (not series_number.endswith('01')) or
         is_survey
     )
     
     if is_derived:
         reasons = []
-        if 'PRIMARY' not in image_type:
+
+        if not has_primary:
             reasons.append('Not PRIMARY')
-        if 'DERIVED' in image_type:
+        if has_derived:
             reasons.append('DERIVED found')
-        if 'SECONDARY' in image_type:
+        if has_secondary:
             reasons.append('SECONDARY found')
-        if 'PROJECTION' in image_type:
+        if has_projection:
             reasons.append('PROJECTION found')
-        if 'RCBV' in image_type:
+        if has_RCBV:
             reasons.append('RCBV found')
+        if has_adc:
+            reasons.append('ADC found')
         if 'Philips' not in manufacturer:
             reasons.append('Not Philips')
-        if not series_number.endswith('01'):
-            reasons.append('Series not ending in 01')
+        if 'REG' not in series_desc:
+            reasons.append('Reg series')
+        if 'ADC' not in series_desc:
+            reasons.append('ADC series')
         if is_survey:
             reasons.append('Survey image')
 
-                
             logging.info(f"Image marked as derived because: {', '.join(reasons)}")
     else:
         logging.info("Image not marked as derived")
@@ -311,13 +332,15 @@ def copy_dicom_image(src_file, dest_base_dir, pattern, anonymize=False, id_map=N
                                      anonymize_birth_date, anonymize_acquisition_date, 
                                      preserve_private_tags, anonymize_accession)
 
-    if decompress:
+    if decompress:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
         dataset = decompress_dataset(dataset)
 
     # Combine SeriesNumber and SeriesDescription
     series_number = get_dicom_attribute(dataset, 'SeriesNumber').zfill(3)  # Pad with zeros to ensure proper sorting
     series_description = sanitize_series_description(get_dicom_attribute(dataset, 'SeriesDescription'))
-    series_dir = f"{series_number}_{series_description}"
+    series_uid = get_dicom_attribute(dataset, 'SeriesInstanceUID')
+    uid_suffix = series_uid.split('.')[-1][-5:]  
+    series_dir = f"{series_number}_{series_description}_{uid_suffix}"
 
     # Handle StudyDate for folder structure
     study_date = get_dicom_attribute(dataset, 'StudyDate')
