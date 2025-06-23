@@ -1,6 +1,8 @@
 import os
 import argparse
 import pydicom
+from pydicom.tag import Tag
+from pydicom.datadict import keyword_for_tag
 from pathvalidate import sanitize_filepath
 from tqdm import tqdm
 import re
