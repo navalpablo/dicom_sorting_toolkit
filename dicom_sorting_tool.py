@@ -1,6 +1,8 @@
 import os
 import argparse
 import pydicom
+from pydicom.tag import Tag
+from pydicom.datadict import keyword_for_tag
 from pathvalidate import sanitize_filepath
 from tqdm import tqdm
 import re
@@ -93,28 +95,30 @@ def generate_dummy_accession_number():
 def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False, anonymize_birth_date=False, 
                         anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False):
     # List of tags to preserve in both basic and strict anonymization
-    preserved_tags = [
+    preserved_tags_hex = [
         "00080070", "00081090", "00181030", "00189423", "00080020", "00180087",
         "00080080", "00200011", "0008103E", "00540081", "00181310", "00280030",
         "00180088", "00180050", "00180080", "00180081", "00180086", "00180091",
         "00180082", "00181314", "00080008", "00189073", "2001101B", "200110C8",
-    #tags for dynamic studies
+        # tags for dynamic studies
         "00080032", "00080033", "00200100", "00200110", "00209111", "00189074",
         # Add these Philips private tags that seem important for dynamic studies
         "20050010", # Philips MR Imaging DD 001
-        "20050014", # Philips MR Imaging DD 005 
+        "20050014", # Philips MR Imaging DD 005
         "20051404", # Remapped from 2005,1004
         "20051406", # Remapped from 2005,1006
         "20010010", # Philips Imaging DD 001
         "20010011", # Philips Imaging DD 002
         "20010090", # Philips Imaging DD 129
-        "20051000", "20051001", "20051002", 
-        "20051008", "20051009", "2005100a", 
-        "20051355"  
+        "20051000", "20051001", "20051002",
+        "20051008", "20051009", "2005100a",
+        "20051355"
     ]
 
+    preserved_tags = [Tag(int(code, 16)) for code in preserved_tags_hex]
+
     # Store values of preserved tags
-    preserved_values = {tag: dataset.get(tag) for tag in preserved_tags if tag in dataset}
+    preserved_values = {tag: dataset[tag].copy() for tag in preserved_tags if tag in dataset}
 
     # Handle PatientID and PatientName
     original_id = dataset.PatientName if id_from_name else dataset.PatientID
@@ -148,35 +152,38 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
             preserved_uids = ['StudyInstanceUID', 'SeriesInstanceUID', 'FrameOfReferenceUID']
             
             # Anonymize other potentially identifying information
-            for tag in dataset.dir():
-                if tag not in preserved_tags:
-                    # Handle Patient-related tags
-                    if tag.startswith('Patient'):
-                        if tag in ['PatientID', 'PatientName', 'PatientBirthDate']:
-                            continue  # Already handled these above
-                        elif tag == 'PatientSex':
-                            setattr(dataset, tag, 'O')  # 'O' for Other/Unknown
-                        elif tag == 'PatientAge':
-                            setattr(dataset, tag, '000Y')  # Set to unknown age
-                        elif tag in ['PatientWeight', 'PatientSize']:
-                            setattr(dataset, tag, '')  # Clear weight and size
-                        elif 'Date' in tag:
-                            setattr(dataset, tag, generate_dummy_date(getattr(dataset, tag)))
-                        elif 'ID' in tag:
-                            setattr(dataset, tag, generate_dummy_id(getattr(dataset, tag)))
-                        else:
-                            setattr(dataset, tag, "ANONYMIZED")
-                    
-                    # Handle UIDs
-                    elif tag.endswith('UID'):
-                        if tag in preserved_uids:
-                            continue  # Skip modifying these critical UIDs
-                        original_uid = getattr(dataset, tag)
-                        setattr(dataset, tag, generate_dummy_uid(original_uid))
+            for elem in dataset.iterall():
+                if elem.tag in preserved_tags:
+                    continue
+
+                tag_keyword = keyword_for_tag(elem.tag)
+
+                if tag_keyword.startswith('Patient'):
+                    if tag_keyword in ['PatientID', 'PatientName', 'PatientBirthDate']:
+                        continue  # Already handled these above
+                    elif tag_keyword == 'PatientSex':
+                        dataset[elem.tag].value = 'O'  # 'O' for Other/Unknown
+                    elif tag_keyword == 'PatientAge':
+                        dataset[elem.tag].value = '000Y'  # Set to unknown age
+                    elif tag_keyword in ['PatientWeight', 'PatientSize']:
+                        dataset[elem.tag].value = ''  # Clear weight and size
+                    elif 'Date' in tag_keyword:
+                        dataset[elem.tag].value = generate_dummy_date(dataset[elem.tag].value)
+                    elif 'ID' in tag_keyword:
+                        dataset[elem.tag].value = generate_dummy_id(str(dataset[elem.tag].value))
+                    else:
+                        dataset[elem.tag].value = "ANONYMIZED"
+
+                # Handle UIDs
+                elif tag_keyword.endswith('UID'):
+                    if tag_keyword in preserved_uids:
+                        continue  # Skip modifying these critical UIDs
+                    original_uid = str(dataset[elem.tag].value)
+                    dataset[elem.tag].value = generate_dummy_uid(original_uid)
                         
     # Restore preserved tags
-    for tag, value in preserved_values.items():
-        setattr(dataset, tag, value)
+    for tag, data_elem in preserved_values.items():
+        dataset[tag] = data_elem
 
     return dataset
     
