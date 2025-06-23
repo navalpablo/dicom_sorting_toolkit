@@ -1,6 +1,8 @@
 import os
 import argparse
 import pydicom
+from pydicom.tag import Tag
+from pydicom.datadict import keyword_for_tag
 from pathvalidate import sanitize_filepath
 from tqdm import tqdm
 import re
@@ -37,6 +39,11 @@ console.setLevel(logging.ERROR)
 formatter = logging.Formatter('%(levelname)s: %(message)s')
 console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
+
+# Globals for anonymization helpers
+missing_ids = set()
+uid_mapping = {}
+uid_lock = multiprocessing.Lock()
 
 def get_dicom_attribute(dataset, attribute):
     try:
@@ -75,23 +82,45 @@ def generate_dummy_id(original_id):
     hash_object = hashlib.md5(original_id.encode())
     return hash_object.hexdigest()[:8]  # Use first 8 characters of the hash
 
-def generate_dummy_uid(original_uid):
-    # Keep the prefix (1.2.840...) and replace the rest with numeric hash
-    uid_parts = original_uid.split('.')
-    prefix = '.'.join(uid_parts[:4])  # Keep the first 4 parts of the UID
-    
-    # Generate a numeric hash
-    hash_object = hashlib.sha256(original_uid.encode())
-    numeric_hash = ''.join([str(int(c, 16)) for c in hash_object.hexdigest()])
-    
-    # Use the first 16 digits of the numeric hash
-    return f"{prefix}.{numeric_hash[:16]}"
+def is_valid_uid(uid):
+    """Validate a DICOM UID string."""
+    if not isinstance(uid, str) or len(uid) == 0 or len(uid) > 64:
+        return False
+    if not re.fullmatch(r"[0-9.]+", uid):
+        return False
+    components = uid.split('.')
+    for comp in components:
+        if comp == '' or (len(comp) > 1 and comp.startswith('0')):
+            return False
+    return True
+
+
+UID_ROOT = "2.25"
+
+
+def generate_org_uid(original_uid, mapping, lock):
+    """Generate a deterministic organizational UID and store it in the mapping."""
+    with lock:
+        if original_uid in mapping:
+            return mapping[original_uid]
+        hashed = hashlib.md5(original_uid.encode()).hexdigest()
+        decimal_uid = str(int(hashed, 16))
+        new_uid = f"{UID_ROOT}.{decimal_uid}"
+        if len(new_uid) > 64:
+            new_uid = new_uid[:64]
+        mapping[original_uid] = new_uid
+        return new_uid
 
 def generate_dummy_accession_number():
     return ''.join([str(random.randint(0, 9)) for _ in range(16)])
 
-def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False, anonymize_birth_date=False, 
-                        anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False):
+def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False, anonymize_birth_date=False,
+                        anonymize_acquisition_date=False, preserve_private_tags=False, anonymize_accession=False,
+                        uid_map=None, lock=None):
+    if uid_map is None:
+        uid_map = uid_mapping
+    if lock is None:
+        lock = uid_lock
     # List of tags to preserve in both basic and strict anonymization
     preserved_tags = [
         "00080070", "00081090", "00181030", "00189423", "00080020", "00180087",
@@ -143,10 +172,10 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
             # Remove all private tags unless preserve_private_tags is True
             if not preserve_private_tags:
                 dataset.remove_private_tags()
-            
+
             # List of UIDs to preserve for dynamic studies
             preserved_uids = ['StudyInstanceUID', 'SeriesInstanceUID', 'FrameOfReferenceUID']
-            
+
             # Anonymize other potentially identifying information
             for tag in dataset.dir():
                 if tag not in preserved_tags:
@@ -166,13 +195,22 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
                             setattr(dataset, tag, generate_dummy_id(getattr(dataset, tag)))
                         else:
                             setattr(dataset, tag, "ANONYMIZED")
-                    
-                    # Handle UIDs
-                    elif tag.endswith('UID'):
-                        if tag in preserved_uids:
-                            continue  # Skip modifying these critical UIDs
-                        original_uid = getattr(dataset, tag)
-                        setattr(dataset, tag, generate_dummy_uid(original_uid))
+
+            # Recursively handle UID elements
+            def _fix_uids(ds):
+                for elem in ds.iterall():
+                    if elem.VR == 'UI' and elem.keyword not in preserved_uids:
+                        def map_val(v):
+                            v_str = str(v)
+                            if not is_valid_uid(v_str) or strict:
+                                return generate_org_uid(v_str, uid_map, lock)
+                            return v_str
+                        if isinstance(elem.value, (list, tuple)):
+                            elem.value = type(elem.value)(map_val(v) for v in elem.value)
+                        else:
+                            elem.value = map_val(elem.value)
+
+            _fix_uids(dataset)
                         
     # Restore preserved tags
     for tag, value in preserved_values.items():
