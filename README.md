@@ -31,26 +31,26 @@ The script requires Python 3 and additional packages: `tqdm`, `pydicom`, and `pa
 Basic usage for sorting DICOM files:
 
 ```bash
-python dicom_sorting_anonimyzing_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted
+python dicom_sorting_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted
 ```
 
 To also anonymize DICOM files (removing Patient Name and Date of Birth, but not Patient ID):
 
 ```bash
-python dicom_sorting_anonimyzing_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted --anonymize
+python dicom_sorting_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted --anonymize
 ```
 
 To perform strict anonymization of DICOM files:
 
 ```bash
-python dicom_sorting_anonimyzing_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted --anonymize --anonymize_strict
+python dicom_sorting_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted --anonymize --anonymize_strict
 ```
 
 
 To replace PatientID based on a correlation table:
 
 ```bash
-python dicom_sorting_anonimyzing_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted --anonymize --ID_correlation /path/to/ID_correlation.txt
+python dicom_sorting_tool.py --dicomin /path/to/unsorted --dicomout /path/to/sorted --anonymize --ID_correlation /path/to/ID_correlation.txt
 ```
 
 ### Arguments
