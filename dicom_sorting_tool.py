@@ -38,6 +38,8 @@ formatter = logging.Formatter('%(levelname)s: %(message)s')
 console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 
+missing_ids = set()
+
 def get_dicom_attribute(dataset, attribute):
     try:
         return str(getattr(dataset, attribute))
@@ -118,7 +120,8 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
 
     # Handle PatientID and PatientName
     original_id = dataset.PatientName if id_from_name else dataset.PatientID
-    if id_map and original_id in id_map:
+    mapping_exists = id_map and original_id in id_map
+    if mapping_exists:
         new_id = id_map[original_id]
     else:
         new_id = generate_dummy_id(original_id)
