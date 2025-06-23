@@ -1,4 +1,5 @@
 import os
+import copy
 import argparse
 import pydicom
 from pydicom.tag import Tag
@@ -141,14 +142,18 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
         "20051008", "20051009", "2005100a", 
         "20051355"  
     ]
-
-    # Store values of preserved tags correctly using Tag objects
+    ...
     preserved_values = {}
     for tag_str in preserved_tags:
-        tag = Tag(int(tag_str, 16))
-        if tag in dataset:
-            preserved_values[tag] = dataset[tag].copy()
+        try:
+            tag = Tag(int(tag_str, 16))
+        except ValueError:
+            continue            # in case the hex string is malformed
 
+        if tag in dataset:
+            preserved_values[tag] = copy.deepcopy(dataset[tag])   # use deepcopy
+    # Store values of preserved tags correctly using Tag objects
+   
     # Handle PatientID and PatientName
     original_id = dataset.PatientName if id_from_name else dataset.PatientID
     if id_map and original_id in id_map:
@@ -217,8 +222,8 @@ def anonymize_dicom_tags(dataset, id_map=None, strict=False, id_from_name=False,
             _fix_uids(dataset)
                         
     # Restore preserved tags
-    for tag, data_elem in preserved_values.items():
-        dataset.add(data_elem)
+    for tag, elem in preserved_values.items():
+        dataset[tag] = elem     # or dataset.add(elem)    
 
     return dataset
     

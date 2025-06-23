@@ -263,7 +263,7 @@ class DicomSortingGUI(QWidget):
         layout.addWidget(license_label)
 
         self.setLayout(layout)
-        self.setWindowTitle('DICOM Sorting Toolkit v0.1.4.1')
+        self.setWindowTitle('DICOM Sorting Toolkit v0.1.5.0')
         self.show()
 
     def browse_directory(self, line_edit):
